@@ -53,7 +53,7 @@ STATIC BOOL WINAPI HeapFree(HANDLE hHeap, DWORD dwFlags, PVOID lpMem)
 
 STATIC BOOL WINAPI RtlFreeHeap(PVOID HeapHandle, ULONG Flags, PVOID BaseAddress)
 {
-    DebugLog("%p, %#x, %p", HeapHandle, Flags, BaseAddress);
+    //DebugLog("%p, %#x, %p", HeapHandle, Flags, BaseAddress);
 
     free(BaseAddress);
 
@@ -109,9 +109,11 @@ STATIC PVOID WINAPI RtlAllocateHeap(PVOID HeapHandle,
                                     ULONG Flags,
                                     SIZE_T Size)
 {
-    DebugLog("%p, %#x, %u", HeapHandle, Flags, Size);
+    // DebugLog("%p, %#x, %#x", HeapHandle, Flags, Size);
 
-    return malloc(Size);
+    void *heapBlock = malloc(Size);
+
+    return heapBlock;
 }
 
 STATIC NTSTATUS WINAPI RtlSetHeapInformation(PVOID Heap,
@@ -140,6 +142,13 @@ STATIC PVOID WINAPI GlobalFree(PVOID hMem)
     return NULL;
 }
 
+STATIC PVOID WINAPI RtlReAllocateHeap(HANDLE hHeap, ULONG uFlags, PVOID ptr, SIZE_T size)
+{
+    DebugLog("%p, %#x, %p, %#x", hHeap, uFlags, ptr, size);
+    PVOID NewHeapBlock = realloc(ptr, size);
+    return NewHeapBlock;
+}
+
 DECLARE_CRT_EXPORT("HeapCreate", HeapCreate);
 DECLARE_CRT_EXPORT("GetProcessHeap", GetProcessHeap);
 DECLARE_CRT_EXPORT("HeapAlloc", HeapAlloc);
@@ -154,3 +163,4 @@ DECLARE_CRT_EXPORT("RtlCreateHeap", RtlCreateHeap);
 DECLARE_CRT_EXPORT("RtlAllocateHeap", RtlAllocateHeap);
 DECLARE_CRT_EXPORT("GlobalAlloc", GlobalAlloc);
 DECLARE_CRT_EXPORT("GlobalFree", GlobalFree);
+DECLARE_CRT_EXPORT("RtlReAllocateHeap", RtlReAllocateHeap);

@@ -45,6 +45,7 @@
 #define STATUS_FAILURE                  0xC0000001
 #define STATUS_NOT_IMPLEMENTED          0xC0000002
 #define STATUS_INVALID_PARAMETER        0xC000000D
+#define STATUS_NO_SUCH_FILE             0xC000000F
 #define STATUS_INVALID_DEVICE_REQUEST   0xC0000010
 #define STATUS_MORE_PROCESSING_REQUIRED 0xC0000016
 #define STATUS_ACCESS_DENIED            0xC0000022
@@ -112,6 +113,7 @@
 #define LOW_REALTIME_PRIORITY           16
 #define HIGH_PRIORITY                   31
 #define MAXIMUM_PRIORITY                32
+#define MAX_PATH                        260
 
 #define PROCESSOR_FEATURE_MAX           64
 
@@ -124,6 +126,14 @@
 
 #define WMIREGISTER                     0
 #define WMIUPDATE                       1
+
+#define ERROR_FILE_NOT_FOUND 2
+#define FILE_ATTRIBUTE_DIRECTORY 16
+#define FILE_ATTRIBUTE_ARCHIVE 32
+#define FILE_ATTRIBUTE_NORMAL 128
+#define FILE_ATTRIBUTE_COMPRESSED 0x800
+#define INVALID_FILE_ATTRIBUTES -1;
+#define ERROR_INSUFFICIENT_BUFFER 0x7A
 
 #define noregparm __attribute__((regparm(0)))
 #define regparm3 __attribute__((regparm(3)))
@@ -784,6 +794,7 @@ enum file_info_class {
 
 enum fs_info_class {
         FileFsVolumeInformation = 1,
+        FileFsDeviceInformation = 4,
         /* ... */
         FileFsMaximumInformation = 9,
 };
@@ -1157,13 +1168,13 @@ struct file_name_info {
         wchar_t *name;
 };
 
-struct file_std_info {
-        LARGE_INTEGER alloc_size;
-        LARGE_INTEGER eof;
-        ULONG num_links;
-        BOOLEAN delete_pending;
-        BOOLEAN dir;
-};
+typedef struct _FILE_STANDARD_INFORMATION {
+        LARGE_INTEGER AllocationSize;
+        LARGE_INTEGER EndOfFile;
+        ULONG NumberOfLinks;
+        BOOLEAN DeletePending;
+        BOOLEAN Directory;
+} FILE_STANDARD_INFORMATION, *PFILE_STANDARD_INFORMATION;
 
 enum nt_obj_type {
         NT_OBJ_EVENT = 10, NT_OBJ_MUTEX, NT_OBJ_THREAD, NT_OBJ_TIMER,
@@ -1323,14 +1334,22 @@ struct time_fields {
         CSHORT weekday;
 };
 
-struct object_attributes {
+typedef struct object_attributes {
         ULONG length;
         void *root_dir;
         struct unicode_string *name;
         ULONG attributes;
         void *security_descr;
         void *security_qos;
-};
+} OBJECT_ATTRIBUTES, *POBJECT_ATTRIBUTES;
+
+typedef struct _IO_STATUS_BLOCK {
+    union {
+        NTSTATUS Status;
+        PVOID    Pointer;
+    } DUMMYUNIONNAME;
+    ULONG_PTR Information;
+} IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
 
 typedef void (*PFLS_CALLBACK_FUNCTION)(PVOID lpFlsData) wstdcall;
 
@@ -1350,7 +1369,7 @@ struct callback_object {
         struct nt_list list;
         struct nt_list callback_funcs;
         BOOLEAN allow_multiple_callbacks;
-        struct object_attributes *attributes;
+        POBJECT_ATTRIBUTES attributes;
 };
 
 enum section_inherit {
@@ -1765,7 +1784,7 @@ static inline struct nt_list *InsertTailList(struct nt_list *head,
 #define FILE_WRITE_DATA                 0x0002
 
 #define FILE_SUPERSEDED                 0x00000000
-#define FILE_OPENED                     0x00000001
+#define FILE_OPEN                       0x00000001
 #define FILE_CREATED                    0x00000002
 #define FILE_OVERWRITTEN                0x00000003
 #define FILE_EXISTS                     0x00000004
@@ -1829,5 +1848,55 @@ typedef enum _HEAP_INFORMATION_CLASS {
     HeapCompatibilityInformation,
     HeapEnableTerminationOnCorruption
 } HEAP_INFORMATION_CLASS;
+
+typedef struct _FILE_FS_DEVICE_INFORMATION {
+    ULONG DeviceType;
+    ULONG Characteristics;
+} FILE_FS_DEVICE_INFORMATION, *PFILE_FS_DEVICE_INFORMATION;
+
+typedef struct _CFG_CALL_TARGET_INFO {
+    ULONG_PTR Offset;
+    ULONG_PTR Flags;
+} CFG_CALL_TARGET_INFO, *PCFG_CALL_TARGET_INFO;
+
+typedef struct _LUID {
+    DWORD LowPart;
+    LONG  HighPart;
+} LUID, *PLUID;
+
+typedef struct _WIN32_FIND_DATAA {
+    DWORD    dwFileAttributes;
+    FILETIME ftCreationTime;
+    FILETIME ftLastAccessTime;
+    FILETIME ftLastWriteTime;
+    DWORD    nFileSizeHigh;
+    DWORD    nFileSizeLow;
+    DWORD    dwReserved0;
+    DWORD    dwReserved1;
+    CHAR     cFileName[MAX_PATH];
+    CHAR     cAlternateFileName[14];
+} WIN32_FIND_DATAA, *PWIN32_FIND_DATAA, *LPWIN32_FIND_DATAA;
+
+typedef struct _WIN32_FILE_ATTRIBUTE_DATA {
+    DWORD    dwFileAttributes;
+    FILETIME ftCreationTime;
+    FILETIME ftLastAccessTime;
+    FILETIME ftLastWriteTime;
+    DWORD    nFileSizeHigh;
+    DWORD    nFileSizeLow;
+} WIN32_FILE_ATTRIBUTE_DATA, *LPWIN32_FILE_ATTRIBUTE_DATA;
+
+typedef struct _BY_HANDLE_FILE_INFORMATION {
+    DWORD    dwFileAttributes;
+    FILETIME ftCreationTime;
+    FILETIME ftLastAccessTime;
+    FILETIME ftLastWriteTime;
+    DWORD    dwVolumeSerialNumber;
+    DWORD    nFileSizeHigh;
+    DWORD    nFileSizeLow;
+    DWORD    nNumberOfLinks;
+    DWORD    nFileIndexHigh;
+    DWORD    nFileIndexLow;
+} BY_HANDLE_FILE_INFORMATION, *PBY_HANDLE_FILE_INFORMATION, *LPBY_HANDLE_FILE_INFORMATION;
 
 #endif /* WINNT_TYPES_H */

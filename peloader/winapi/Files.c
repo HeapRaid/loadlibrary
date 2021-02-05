@@ -10,38 +10,93 @@
 #include <unistd.h>
 
 #include "winnt_types.h"
+#include "codealloc.h"
 #include "pe_linker.h"
 #include "ntoskernel.h"
 #include "log.h"
 #include "winexports.h"
 #include "util.h"
 #include "winstrings.h"
+#include "Files.h"
+#include "file_mapping.h"
 
-typedef struct _WIN32_FILE_ATTRIBUTE_DATA {
-  DWORD    dwFileAttributes;
-  FILETIME ftCreationTime;
-  FILETIME ftLastAccessTime;
-  FILETIME ftLastWriteTime;
-  DWORD    nFileSizeHigh;
-  DWORD    nFileSizeLow;
-} WIN32_FILE_ATTRIBUTE_DATA, *LPWIN32_FILE_ATTRIBUTE_DATA;
-extern void WINAPI SetLastError(DWORD dwErrCode);
+union size {
+    int64_t size;
+    struct {
+        int32_t low;
+        int32_t high;
+    };
+} Size;
 
-#define ERROR_FILE_NOT_FOUND 2
+union offset {
+    int64_t offset;
+    struct {
+        int32_t low;
+        int32_t high;
+    };
+} Offset;
 
-#define FILE_ATTRIBUTE_NORMAL 128
-#define FILE_ATTRIBUTE_DIRECTORY 16
+MappedFileObjectList FileMappingList;
 
-#define INVALID_FILE_ATTRIBUTES -1;
+NTSTATUS WINAPI NtCreateFile(HANDLE *FileHandle,
+                             ACCESS_MASK DesiredAccess,
+                             POBJECT_ATTRIBUTES ObjectAttributes,
+                             PIO_STATUS_BLOCK IoStatusBlock,
+                             LARGE_INTEGER *AllocationSize,
+                             ULONG FileAttributes,
+                             ULONG ShareAccess,
+                             ULONG CreateDisposition,
+                             ULONG CreateOptions,
+                             PVOID EaBuffer,
+                             ULONG EaLength)
+{
+    LPSTR filename = CreateAnsiFromWide(ObjectAttributes->name->Buffer);
 
-static DWORD WINAPI GetFileAttributesW(PVOID lpFileName)
+    DebugLog("%p, %#x, %p, [%s]", FileHandle, DesiredAccess, ObjectAttributes, filename);
+
+    // Translate path seperator.
+    while (strchr(filename, '\\'))
+    *strchr(filename, '\\') = '/';
+
+    // I'm just going to tolower() everything.
+    for (char *t = filename; *t; t++)
+    *t = tolower(*t);
+
+    switch (CreateDisposition) {
+        case FILE_SUPERSEDED:
+            *FileHandle = fopen(filename, "r");
+            break;
+        case FILE_OPEN:
+            if (access(filename, F_OK) == 0){
+                *FileHandle = fopen(filename, "r+");
+            }
+            else {
+                free(filename);
+                return STATUS_NO_SUCH_FILE;
+            }
+            break;
+            // This is the disposition used by CreateTempFile().
+        case FILE_CREATED:
+            *FileHandle = fopen(filename, "w");
+            // Unlink it immediately so it's cleaned up on exit.
+            unlink(filename);
+            break;
+        default:
+            abort();
+    }
+
+    free(filename);
+
+    return 0;
+}
+
+STATIC DWORD WINAPI GetFileAttributesW(PVOID lpFileName)
 {
     DWORD Result = FILE_ATTRIBUTE_NORMAL;
     char *filename = CreateAnsiFromWide(lpFileName);
     DebugLog("%p [%s]", lpFileName, filename);
 
-    if (strstr(filename, "RebootActions") || strstr(filename, "RtSigs")
-    ) {
+    if (strstr(filename, "RebootActions") || strstr(filename, "RtSigs")) {
         Result = INVALID_FILE_ATTRIBUTES;
         goto finish;
     }
@@ -51,7 +106,27 @@ finish:
     return Result;
 }
 
-static DWORD WINAPI GetFileAttributesExW(PWCHAR lpFileName, DWORD fInfoLevelId, LPWIN32_FILE_ATTRIBUTE_DATA lpFileInformation)
+STATIC BOOL WINAPI SetFileAttributesA(LPCSTR lpFileName,
+                                      DWORD dwFileAttributes)
+{
+    DebugLog("%p [%s]", lpFileName, lpFileName);
+
+    SetLastError(0);
+    return true;
+}
+
+STATIC BOOL WINAPI SetFileAttributesW(LPWSTR lpFileName,
+                               DWORD dwFileAttributes)
+{
+    LPSTR lpFileNameA = CreateAnsiFromWide(lpFileName);
+    DebugLog("%p [%s], %#x", lpFileName, lpFileNameA, dwFileAttributes);
+
+    SetLastError(0);
+
+    return true;
+}
+
+STATIC DWORD WINAPI GetFileAttributesExW(PWCHAR lpFileName, DWORD fInfoLevelId, LPWIN32_FILE_ATTRIBUTE_DATA lpFileInformation)
 {
     char *filename = CreateAnsiFromWide(lpFileName);
     DebugLog("%p [%s], %u, %p", lpFileName, filename, fInfoLevelId, lpFileInformation);
@@ -63,15 +138,8 @@ static DWORD WINAPI GetFileAttributesExW(PWCHAR lpFileName, DWORD fInfoLevelId, 
     return TRUE;
 }
 
-enum {
-    CREATE_NEW          = 1,
-    CREATE_ALWAYS       = 2,
-    OPEN_EXISTING       = 3,
-    OPEN_ALWAYS         = 4,
-    TRUNCATE_EXISTING   = 5
-};
 
-static HANDLE WINAPI CreateFileA(PCHAR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, PVOID lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
+HANDLE WINAPI CreateFileA(PCHAR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, PVOID lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
 {
     FILE *FileHandle;
 
@@ -108,12 +176,11 @@ static HANDLE WINAPI CreateFileA(PCHAR lpFileName, DWORD dwDesiredAccess, DWORD 
 
     DebugLog("%s => %p", lpFileName, FileHandle);
 
-    SetLastError(ERROR_FILE_NOT_FOUND);
+    FileHandle ? SetLastError(0) : SetLastError(ERROR_FILE_NOT_FOUND);
     return FileHandle ? FileHandle : INVALID_HANDLE_VALUE;
 }
 
-
-static HANDLE WINAPI CreateFileW(PWCHAR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, PVOID lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
+HANDLE WINAPI CreateFileW(PWCHAR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, PVOID lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
 {
     FILE *FileHandle;
     char *filename = CreateAnsiFromWide(lpFileName);
@@ -162,11 +229,11 @@ static HANDLE WINAPI CreateFileW(PWCHAR lpFileName, DWORD dwDesiredAccess, DWORD
 /**
  * TODO: handle 64 bit 
  */
-static DWORD WINAPI SetFilePointer(HANDLE hFile, LONG liDistanceToMove,  LONG *lpDistanceToMoveHigh, DWORD dwMoveMethod)
+STATIC DWORD WINAPI SetFilePointer(HANDLE hFile, LONG liDistanceToMove,  LONG *lpDistanceToMoveHigh, DWORD dwMoveMethod)
 {
     int result;
 
-    DebugLog("%p, %llu, %p, %u", hFile, liDistanceToMove, lpDistanceToMoveHigh, dwMoveMethod);
+    DebugLog("%p, %#x, %p, %u", hFile, liDistanceToMove, lpDistanceToMoveHigh, dwMoveMethod);
 
     result = fseek(hFile, liDistanceToMove, dwMoveMethod);
 
@@ -179,12 +246,11 @@ static DWORD WINAPI SetFilePointer(HANDLE hFile, LONG liDistanceToMove,  LONG *l
     return pos;
 }
 
-
-static BOOL WINAPI SetFilePointerEx(HANDLE hFile, uint64_t liDistanceToMove,  uint64_t *lpNewFilePointer, DWORD dwMoveMethod)
+STATIC BOOL WINAPI SetFilePointerEx(HANDLE hFile, uint64_t liDistanceToMove,  uint64_t *lpNewFilePointer, DWORD dwMoveMethod)
 {
     int result;
 
-    //DebugLog("%p, %llu, %p, %u", hFile, liDistanceToMove, lpNewFilePointer, dwMoveMethod);
+    DebugLog("%p, %llu, %p, %u", hFile, liDistanceToMove, lpNewFilePointer, dwMoveMethod);
 
     result = fseek(hFile, liDistanceToMove, dwMoveMethod);
 
@@ -198,9 +264,12 @@ static BOOL WINAPI SetFilePointerEx(HANDLE hFile, uint64_t liDistanceToMove,  ui
     //return result != -1; 
 }
 
-static BOOL WINAPI CloseHandle(HANDLE hObject)
+STATIC BOOL WINAPI CloseHandle(HANDLE hObject)
 {
     DebugLog("%p", hObject);
+    /*if (DeleteMappedFile(hObject, &FileMappingList)) {
+        return TRUE;
+    }*/
     if (hObject != (HANDLE) 'EVNT'
      && hObject != INVALID_HANDLE_VALUE
      && hObject != (HANDLE) 'SEMA')
@@ -208,19 +277,22 @@ static BOOL WINAPI CloseHandle(HANDLE hObject)
     return TRUE;
 }
 
-static BOOL WINAPI ReadFile(HANDLE hFile, PVOID lpBuffer, DWORD nNumberOfBytesToRead, PDWORD lpNumberOfBytesRead, PVOID lpOverlapped)
+
+STATIC BOOL WINAPI ReadFile(HANDLE hFile, PVOID lpBuffer, DWORD nNumberOfBytesToRead, PDWORD lpNumberOfBytesRead, PVOID lpOverlapped)
 {
+    DebugLog("%p, %p, %#x", hFile, lpBuffer, nNumberOfBytesToRead);
     *lpNumberOfBytesRead = fread(lpBuffer, 1, nNumberOfBytesToRead, hFile);
     return TRUE;
 }
 
-static BOOL WINAPI WriteFile(HANDLE hFile, PVOID lpBuffer, DWORD nNumberOfBytesToWrite, PDWORD lpNumberOfBytesWritten, PVOID lpOverlapped)
+STATIC BOOL WINAPI WriteFile(HANDLE hFile, PVOID lpBuffer, DWORD nNumberOfBytesToWrite, PDWORD lpNumberOfBytesWritten, PVOID lpOverlapped)
 {
+    DebugLog("%p, %p, %#x", hFile, lpBuffer, nNumberOfBytesToWrite);
     *lpNumberOfBytesWritten = fwrite(lpBuffer, 1, nNumberOfBytesToWrite, hFile);
     return TRUE;
 }
 
-static BOOL WINAPI DeleteFileW(PWCHAR lpFileName)
+STATIC BOOL WINAPI DeleteFileW(PWCHAR lpFileName)
 {
     char *AnsiFilename = CreateAnsiFromWide(lpFileName);
 
@@ -229,8 +301,15 @@ static BOOL WINAPI DeleteFileW(PWCHAR lpFileName)
     free(AnsiFilename);
     return TRUE;
 }
+STATIC BOOL WINAPI DeleteFileA(LPCSTR lpFileName)
+{
+    DebugLog("%p [%s]", lpFileName, lpFileName);
 
-static BOOL WINAPI GetFileSizeEx(HANDLE hFile, uint64_t *lpFileSize)
+    return TRUE;
+}
+
+
+STATIC BOOL WINAPI GetFileSizeEx(HANDLE hFile, uint64_t *lpFileSize)
 {
     long curpos = ftell(hFile);
 
@@ -246,36 +325,126 @@ static BOOL WINAPI GetFileSizeEx(HANDLE hFile, uint64_t *lpFileSize)
     return TRUE;
 }
 
-static HANDLE WINAPI FindFirstFileW(PWCHAR lpFileName, PVOID lpFindFileData)
+STATIC DWORD WINAPI GetFileSize(HANDLE hFile, DWORD *lpFileSizeHigh)
 {
-    char *name = CreateAnsiFromWide(lpFileName);
+    long curpos = ftell(hFile);
 
-    DebugLog("%p [%s], %p", lpFileName, name, lpFindFileData);
+    fseek(hFile, 0, SEEK_END);
 
-    free(name);
+    size_t FileSize = ftell(hFile);
 
-    SetLastError(ERROR_FILE_NOT_FOUND);
+    Size.size = FileSize;
 
-    return INVALID_HANDLE_VALUE;
+    fseek(hFile, curpos, SEEK_SET);
+
+    DebugLog("%p => %#x", hFile, FileSize);
+
+    if (lpFileSizeHigh != NULL)
+        *lpFileSizeHigh = Size.high;
+
+    return FileSize;
 }
 
-static DWORD WINAPI NtOpenSymbolicLinkObject(PHANDLE LinkHandle, DWORD DesiredAccess, PVOID ObjectAttributes)
+DWORD WINAPI GetFileAttributesA(LPCSTR lpFileName)
 {
+    DWORD Result = FILE_ATTRIBUTE_NORMAL;
+    DebugLog("%p [%s]", lpFileName, lpFileName);
+
+    if (strstr(lpFileName, "RebootActions") || strstr(lpFileName, "RtSigs")) {
+        Result = INVALID_FILE_ATTRIBUTES;
+    }
+
+    if(strncmp(lpFileName, ".\\FAKETEMP\\", strlen(".\\FAKETEMP\\")) == 0) {
+        Result = FILE_ATTRIBUTE_DIRECTORY;
+    }
+
+    return Result;
+}
+
+STATIC HANDLE WINAPI CreateFileMappingA(HANDLE hFile,
+                                          PVOID lpFileMappingAttributes,
+                                          DWORD flProtect,
+                                          DWORD dwMaximumSizeHigh,
+                                          DWORD dwMaximumSizeLow,
+                                          LPCSTR lpName)
+{
+    DebugLog("%p, %#x, %#x, %#x, [%s]", hFile, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
+    Size.high = dwMaximumSizeHigh;
+    Size.low = dwMaximumSizeLow;
+
+    MappedFileEntry *pMappedFileObjectEntry = (MappedFileEntry*) calloc(1, sizeof(MappedFileEntry));
+
+    int fd = fileno(hFile);
+    pMappedFileObjectEntry->fd = fd;
+
+    PVOID addr = mmap(NULL, Size.size, PROT_READ, MAP_PRIVATE, fd, 0);
+    pMappedFileObjectEntry->start = (intptr_t) addr;
+    pMappedFileObjectEntry->end = (intptr_t) addr + Size.size;
+    pMappedFileObjectEntry->size = Size.size;
+
+    if (addr == MAP_FAILED) {
+        DebugLog("[ERROR] failed to create file object mapping: %s", strerror(errno));
+        free(pMappedFileObjectEntry);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    AddMappedFile(pMappedFileObjectEntry, &FileMappingList);
+
+    DebugLog("%p => %p", hFile, pMappedFileObjectEntry);
+
+    return pMappedFileObjectEntry;
+}
+
+
+STATIC PVOID WINAPI MapViewOfFile(HANDLE hFileMappingObject,
+                                  DWORD dwDesiredAccess,
+                                  DWORD dwFileOffsetHigh,
+                                  DWORD dwFileOffsetLow,
+                                  SIZE_T dwNumberOfBytesToMap)
+{
+    DebugLog("%p, %#x, %#x, %#x, %#x", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap);
+
+    Offset.high = dwFileOffsetHigh;
+    Offset.low = dwFileOffsetLow;
+
+    MappedFileEntry *MappedFile = (MappedFileEntry*) hFileMappingObject;
+
+    PVOID FileView = malloc(dwNumberOfBytesToMap);
+    if (dwNumberOfBytesToMap == 0) {
+        dwNumberOfBytesToMap = MappedFile->size - Offset.offset;
+        FileView = realloc(FileView, dwNumberOfBytesToMap);
+
+    }
+    if (FileView == NULL) {
+        DebugLog("[ERROR] failed to allocate view of file: %s ", strerror(errno));
+        return NULL;
+    }
+
+    memcpy(FileView, (void*)MappedFile->start + Offset.offset, dwNumberOfBytesToMap);
+
+    return FileView;
+}
+
+STATIC DWORD WINAPI NtOpenSymbolicLinkObject(PHANDLE LinkHandle, DWORD DesiredAccess, PVOID ObjectAttributes)
+{
+    DebugLog("");
     *LinkHandle = (HANDLE) 'SYMB';
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS WINAPI NtQuerySymbolicLinkObject(HANDLE LinkHandle, PUNICODE_STRING LinkTarget, PULONG ReturnedLength)
+STATIC NTSTATUS WINAPI NtQuerySymbolicLinkObject(HANDLE LinkHandle, PUNICODE_STRING LinkTarget, PULONG ReturnedLength)
 {
+    DebugLog("");
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS WINAPI NtClose(HANDLE Handle)
+STATIC NTSTATUS WINAPI NtClose(HANDLE Handle)
 {
+    DebugLog("");
     return STATUS_SUCCESS;
 }
 
-static BOOL WINAPI DeviceIoControl(
+STATIC BOOL WINAPI DeviceIoControl(
   HANDLE       hDevice,
   DWORD        dwIoControlCode,
   PVOID       lpInBuffer,
@@ -289,68 +458,125 @@ static BOOL WINAPI DeviceIoControl(
     return FALSE;
 }
 
-static NTSTATUS  NtQueryVolumeInformationFile(
- HANDLE               FileHandle,
- PVOID                IoStatusBlock,
- PVOID                FsInformation,
- ULONG                Length,
- DWORD FsInformationClass)
+STATIC NTSTATUS WINAPI NtQueryVolumeInformationFile(HANDLE FileHandle,
+                                             PVOID IoStatusBlock,
+                                             PVOID FsInformation,
+                                             ULONG Length,
+                                             DWORD FsInformationClass)
 {
-    DebugLog("");
-    return 1;
+    DebugLog("%p, %p, %#x", FileHandle, FsInformation, FsInformationClass);
+    if (FsInformationClass == FileFsDeviceInformation){
+        ((PFILE_FS_DEVICE_INFORMATION)FsInformation)->DeviceType = FILE_DEVICE_DISK;
+        ((PFILE_FS_DEVICE_INFORMATION)FsInformation)->Characteristics = 0x0;
+    }
+    return 0;
 }
 
-static DWORD WINAPI GetFullPathNameW(
-  PWCHAR lpFileName,
-  DWORD   nBufferLength,
-  PWCHAR  lpBuffer,
-  PWCHAR  *lpFilePart)
+STATIC DWORD WINAPI GetFullPathNameW(PWCHAR lpFileName,
+                                     DWORD nBufferLength,
+                                     PWCHAR lpBuffer,
+                                     PWCHAR *lpFilePart)
 {
     DebugLog("");
     return 0;
 }
 
-static BOOL SetEndOfFile(HANDLE hFile)
+STATIC BOOL WINAPI SetEndOfFile(HANDLE hFile)
 {
     DebugLog("");
     return ftruncate(fileno(hFile), ftell(hFile)) != -1;
 }
 
-static DWORD WINAPI GetFileVersionInfoSizeExW(DWORD dwFlags, PWCHAR lptstrFilename, PDWORD lpdwHandle)
+STATIC DWORD WINAPI GetFileVersionInfoSizeExW(DWORD dwFlags, PWCHAR lptstrFilename, PDWORD lpdwHandle)
 {
     DebugLog("%#x, %p, %p", dwFlags, lptstrFilename, lpdwHandle);
     return 0;
 }
 
-static BOOL WINAPI GetFileVersionInfoExW(DWORD dwFlags, PWCHAR lptstrFilename, DWORD dwHandle, DWORD dwLen, PVOID lpData)
+STATIC BOOL WINAPI GetFileVersionInfoExW(DWORD dwFlags, PWCHAR lptstrFilename, DWORD dwHandle, DWORD dwLen, PVOID lpData)
 {
     DebugLog("");
     return FALSE;
 }
 
-static BOOL WINAPI VerQueryValueW(PVOID pBlock, PWCHAR lpSubBlock, PVOID  *lplpBuffer, PDWORD puLen)
+STATIC BOOL WINAPI VerQueryValueW(PVOID pBlock, PWCHAR lpSubBlock, PVOID  *lplpBuffer, PDWORD puLen)
 {
     DebugLog("");
     return FALSE;
 }
 
-static DWORD WINAPI QueryDosDevice(PVOID lpDeviceName, PVOID lpTargetPath, DWORD ucchMax)
+STATIC DWORD WINAPI QueryDosDevice(PVOID lpDeviceName, PVOID lpTargetPath, DWORD ucchMax)
 {
     DebugLog("");
     return 0;
 }
 
-static BOOL WINAPI GetDiskFreeSpaceExW(PWCHAR lpDirectoryName, PVOID lpFreeBytesAvailableToCaller, PVOID lpTotalNumberOfBytes, QWORD *lpTotalNumberOfFreeBytes)
+STATIC BOOL WINAPI GetDiskFreeSpaceExW(PWCHAR lpDirectoryName, PVOID lpFreeBytesAvailableToCaller, PVOID lpTotalNumberOfBytes, QWORD *lpTotalNumberOfFreeBytes)
 {
     DebugLog("%S", lpDirectoryName);
     *lpTotalNumberOfFreeBytes = 0x000000000ULL;
     return FALSE;
 }
 
+STATIC NTSTATUS WINAPI NtQueryInformationFile(HANDLE FileHandle,
+                                       PVOID IoStatusBlock,
+                                       PVOID FileInformation,
+                                       ULONG Length,
+                                       DWORD FileInformationClass)
+{
+    DebugLog("%p, %#x, %#x", FileHandle, Length, FileInformationClass);
+    if (FileInformationClass == FileStandardInformation) {
+        fseek((FILE*)FileHandle, 0L, SEEK_END);
+        size_t FileSize = ftell((FILE*)FileHandle);
+        rewind((FILE*)FileHandle);
+        ((PFILE_STANDARD_INFORMATION) FileInformation)->AllocationSize = FileSize;
+        ((PFILE_STANDARD_INFORMATION) FileInformation)->EndOfFile = FileSize;
+        ((PFILE_STANDARD_INFORMATION) FileInformation)->NumberOfLinks = 0;
+        ((PFILE_STANDARD_INFORMATION) FileInformation)->DeletePending = FALSE;
+        ((PFILE_STANDARD_INFORMATION) FileInformation)->Directory = FALSE; //TODO: Check if FileHandle is a directory
+    }
+    return 0;
+}
+
+STATIC BOOL WINAPI SetFileTime(HANDLE hFile,
+                               const FILETIME *lpCreationTime,
+                               const FILETIME *lpLastAccessTime,
+                               const FILETIME *lpLastWriteTime)
+{
+    DebugLog("%p, %p, %p, %p", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
+
+    return true;
+}
+
+STATIC BOOL WINAPI GetFileTime(HANDLE hFile,
+                               PFILETIME lpCreationTime,
+                               PFILETIME lpLastAccessTime,
+                               PFILETIME lpLastWriteTime) // TO FIX
+{
+    DebugLog("%p, %p, %p, %p", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
+    lpCreationTime->dwHighDateTime = 0;
+    lpCreationTime->dwLowDateTime = 0;
+    lpLastAccessTime->dwHighDateTime = 0;
+    lpLastAccessTime->dwLowDateTime = 0;
+    lpLastWriteTime->dwLowDateTime = 0;
+    lpLastWriteTime->dwLowDateTime = 0;
+
+    return true;
+}
+
+STATIC DWORD WINAPI GetFileType(HANDLE hFile)
+{
+    DebugLog("%p", hFile);
+
+    return FILE_TYPE_DISK;
+}
+
 DECLARE_CRT_EXPORT("VerQueryValueW", VerQueryValueW);
 DECLARE_CRT_EXPORT("GetFileVersionInfoExW", GetFileVersionInfoExW);
 DECLARE_CRT_EXPORT("GetFileVersionInfoSizeExW", GetFileVersionInfoSizeExW);
 DECLARE_CRT_EXPORT("GetFileAttributesW", GetFileAttributesW);
+DECLARE_CRT_EXPORT("SetFileAttributesA", SetFileAttributesA);
+DECLARE_CRT_EXPORT("SetFileAttributesW", SetFileAttributesW);
 DECLARE_CRT_EXPORT("GetFileAttributesExW", GetFileAttributesExW);
 DECLARE_CRT_EXPORT("CreateFileA", CreateFileA);
 DECLARE_CRT_EXPORT("CreateFileW", CreateFileW);
@@ -361,7 +587,7 @@ DECLARE_CRT_EXPORT("ReadFile", ReadFile);
 DECLARE_CRT_EXPORT("WriteFile", WriteFile);
 DECLARE_CRT_EXPORT("DeleteFileW", DeleteFileW);
 DECLARE_CRT_EXPORT("GetFileSizeEx", GetFileSizeEx);
-DECLARE_CRT_EXPORT("FindFirstFileW", FindFirstFileW);
+DECLARE_CRT_EXPORT("GetFileSize", GetFileSize);
 DECLARE_CRT_EXPORT("NtOpenSymbolicLinkObject", NtOpenSymbolicLinkObject);
 DECLARE_CRT_EXPORT("NtQuerySymbolicLinkObject", NtQuerySymbolicLinkObject);
 DECLARE_CRT_EXPORT("NtClose", NtClose);
@@ -371,3 +597,12 @@ DECLARE_CRT_EXPORT("GetFullPathNameW", GetFullPathNameW);
 DECLARE_CRT_EXPORT("SetEndOfFile", SetEndOfFile);
 DECLARE_CRT_EXPORT("QueryDosDeviceW", QueryDosDevice);
 DECLARE_CRT_EXPORT("GetDiskFreeSpaceExW", GetDiskFreeSpaceExW);
+DECLARE_CRT_EXPORT("NtQueryInformationFile", NtQueryInformationFile);
+DECLARE_CRT_EXPORT("SetFileTime", SetFileTime);
+DECLARE_CRT_EXPORT("GetFileTime", GetFileTime);
+DECLARE_CRT_EXPORT("GetFileType", GetFileType);
+DECLARE_CRT_EXPORT("CreateFileMappingA", CreateFileMappingA);
+DECLARE_CRT_EXPORT("GetFileAttributesA", GetFileAttributesA);
+DECLARE_CRT_EXPORT("MapViewOfFile", MapViewOfFile);
+DECLARE_CRT_EXPORT("DeleteFileA", DeleteFileA);
+DECLARE_CRT_EXPORT("NtCreateFile", NtCreateFile);

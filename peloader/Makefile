@@ -1,5 +1,5 @@
 CFLAGS  = -O3 -march=native -ggdb3 -m32 -std=gnu99 -fshort-wchar -Wno-multichar -Iinclude -mstackrealign
-CPPFLAGS=-DNDEBUG -D_GNU_SOURCE -I.
+CPPFLAGS= -DNDEBUG -D_GNU_SOURCE -I.
 LDFLAGS = $(CFLAGS) -m32 -lm
 
 .PHONY: clean
@@ -11,7 +11,7 @@ TARGETS=libpeloader.a
 
 all: $(TARGETS)
 
-libpeloader.a: $(WINAPI) winstrings.o pe_linker.o crt.o log.o util.o extra.o
+libpeloader.a: $(WINAPI) winstrings.o pe_linker.o crt.o log.o util.o extra.o file_mapping.o
 	$(AR) $(ARFLAGS) $@ $^
 
 clean:

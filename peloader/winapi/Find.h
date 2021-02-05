@@ -1,0 +1,9 @@
+#ifndef LOADLIBRARY_FIND_H
+#define LOADLIBRARY_FIND_H
+
+HANDLE WINAPI FindFirstFileW(PWCHAR lpFileName, PVOID lpFindFileData);
+HANDLE WINAPI FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData);
+BOOL WINAPI FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData);
+BOOL WINAPI FindClose(HANDLE hFindFile);
+
+#endif //LOADLIBRARY_FIND_H

@@ -35,6 +35,15 @@ static HANDLE WINAPI CreateEventW(PVOID lpEventAttributes, BOOL bManualReset, BO
     return (HANDLE) 'EVNT';
 }
 
+static HANDLE WINAPI CreateEventA(PVOID lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCSTR lpName)
+{
+    DebugLog("%p, %u, %u, %p [%s]", lpEventAttributes, bManualReset, bInitialState, lpName, lpName);
+
+    SetLastError(0);
+
+    return (HANDLE) 'EVNT';
+}
+
 static BOOL WINAPI SetEvent(HANDLE hEvent)
 {
     DebugLog("%p", hEvent);
@@ -48,5 +57,6 @@ static BOOL WINAPI ResetEvent(HANDLE hEvent)
 }
 
 DECLARE_CRT_EXPORT("CreateEventW", CreateEventW);
+DECLARE_CRT_EXPORT("CreateEventA", CreateEventA);
 DECLARE_CRT_EXPORT("SetEvent", SetEvent);
 DECLARE_CRT_EXPORT("ResetEvent", ResetEvent);
