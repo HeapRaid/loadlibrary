@@ -38,6 +38,15 @@ union offset {
 
 static MappedFileViewList* MappedFileViews;
 
+typedef struct _CREATEFILE2_EXTENDED_PARAMETERS {
+    DWORD dwSize;
+    DWORD dwFileAttributes;
+    DWORD dwFileFlags;
+    DWORD dwSecurityQosFlags;
+    PVOID lpSecurityAttributes;
+    HANDLE hTemplateFile;
+} CREATEFILE2_EXTENDED_PARAMETERS, *PCREATEFILE2_EXTENDED_PARAMETERS;
+
 NTSTATUS WINAPI NtCreateFile(HANDLE *FileHandle,
                              ACCESS_MASK DesiredAccess,
                              POBJECT_ATTRIBUTES ObjectAttributes,
@@ -224,6 +233,16 @@ HANDLE WINAPI CreateFileW(PWCHAR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 
     SetLastError(ERROR_FILE_NOT_FOUND);
     return FileHandle ? FileHandle : INVALID_HANDLE_VALUE;
+}
+
+HANDLE CreateFile2(PWCHAR lpFileName,
+                   DWORD dwDesiredAccess,
+                   DWORD dwShareMode,
+                   DWORD dwCreationDisposition,
+                   PCREATEFILE2_EXTENDED_PARAMETERS pCreateExParams)
+{
+    return CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, pCreateExParams->lpSecurityAttributes, dwCreationDisposition,
+        pCreateExParams->dwFileAttributes | pCreateExParams->dwFileFlags, pCreateExParams->hTemplateFile);
 }
 
 /**
@@ -666,3 +685,4 @@ DECLARE_CRT_EXPORT("FlushViewOfFile", FlushViewOfFile);
 DECLARE_CRT_EXPORT("UnmapViewOfFile", UnmapViewOfFile);
 DECLARE_CRT_EXPORT("DeleteFileA", DeleteFileA);
 DECLARE_CRT_EXPORT("NtCreateFile", NtCreateFile);
+DECLARE_CRT_EXPORT("CreateFile2", CreateFile2);
