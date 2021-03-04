@@ -4,23 +4,18 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-
-typedef struct mapped_file_entry {
+typedef struct mapped_file_view {
     void *next;
-    intptr_t start;
-    intptr_t end;
-    int64_t size;
-    int fd;
-} MappedFileEntry;
+    void *base;
+    size_t size;
+} MappedFileView;
 
-typedef struct mapped_file_object_list {
-    MappedFileEntry *head;
-} MappedFileObjectList;
+typedef struct mapped_file_view_list {
+    MappedFileView *head;
+} MappedFileViewList;
 
-void AddMappedFile(MappedFileEntry *mapped_file, MappedFileObjectList *list);
-bool DeleteMappedFile(MappedFileEntry *mapped_file, MappedFileObjectList *list);
-MappedFileEntry* SearchMappedFile(MappedFileEntry *mapped_file, MappedFileObjectList *list);
-
-extern MappedFileObjectList FileMappingList;
+void AddMappedView(MappedFileView *mapped_view, MappedFileViewList **list);
+bool DeleteMappedView(MappedFileView *mapped_view, MappedFileViewList *list);
+MappedFileView* SearchMappedViews(void *base, MappedFileViewList *list);
 
 #endif //LOADLIBRARY_FILE_MAPPING_H

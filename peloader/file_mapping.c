@@ -2,16 +2,19 @@
 #include "file_mapping.h"
 
 
-void AddMappedFile(MappedFileEntry *mapped_file, MappedFileObjectList *list)
+void AddMappedView(MappedFileView *mapped_view, MappedFileViewList **pList)
 {
+    MappedFileView *current;
+    MappedFileViewList *list = *pList;
     if (list == NULL) {
-        list = (MappedFileObjectList *) malloc(sizeof(MappedFileObjectList));
-        list->head = NULL;
+        list = (MappedFileViewList *) malloc(sizeof(MappedFileViewList));
+        list->head = mapped_view;
+        *pList = list;
+        return;
     }
-    MappedFileEntry *current;
 
     if (list->head == NULL) {
-        list->head = mapped_file;
+        list->head = mapped_view;
         return;
     }
 
@@ -21,16 +24,18 @@ void AddMappedFile(MappedFileEntry *mapped_file, MappedFileObjectList *list)
         current = current->next;
     }
 
-    current->next = mapped_file;
+    current->next = mapped_view;
 }
 
-bool DeleteMappedFile(MappedFileEntry *mapped_file, MappedFileObjectList *list)
+bool DeleteMappedView(MappedFileView *mapped_file, MappedFileViewList *list)
 {
-    MappedFileEntry *to_delete = NULL;
-    MappedFileEntry *current = list->head;
+    MappedFileView *to_delete = NULL;
+    MappedFileView *current;
 
     if (list == NULL)
         return false;
+
+    current = list->head;
 
     // mapped_file is the first in the list
     if (current == mapped_file) {
@@ -53,12 +58,12 @@ bool DeleteMappedFile(MappedFileEntry *mapped_file, MappedFileObjectList *list)
     return false;
 }
 
-MappedFileEntry* SearchMappedFile(MappedFileEntry *mapped_file, MappedFileObjectList *list)
+MappedFileView* SearchMappedViews(void *base, MappedFileViewList *list)
 {
     if (list == NULL)
         return NULL;
-    MappedFileEntry *current = list->head;
-    while(current != NULL && current != mapped_file)
+    MappedFileView *current = list->head;
+    while(current->base != base && current->next != NULL)
         current = current->next;
-    return current;
+    return base == current->base ? current : NULL;
 }

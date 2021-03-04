@@ -36,7 +36,7 @@ union offset {
     };
 } Offset;
 
-MappedFileObjectList FileMappingList;
+static MappedFileViewList* MappedFileViews;
 
 NTSTATUS WINAPI NtCreateFile(HANDLE *FileHandle,
                              ACCESS_MASK DesiredAccess,
@@ -267,9 +267,6 @@ STATIC BOOL WINAPI SetFilePointerEx(HANDLE hFile, uint64_t liDistanceToMove,  ui
 STATIC BOOL WINAPI CloseHandle(HANDLE hObject)
 {
     DebugLog("%p", hObject);
-    /*if (DeleteMappedFile(hObject, &FileMappingList)) {
-        return TRUE;
-    }*/
     if (hObject != (HANDLE) 'EVNT'
      && hObject != INVALID_HANDLE_VALUE
      && hObject != (HANDLE) 'SEMA')
@@ -362,39 +359,87 @@ DWORD WINAPI GetFileAttributesA(LPCSTR lpFileName)
 }
 
 STATIC HANDLE WINAPI CreateFileMappingA(HANDLE hFile,
-                                          PVOID lpFileMappingAttributes,
-                                          DWORD flProtect,
-                                          DWORD dwMaximumSizeHigh,
-                                          DWORD dwMaximumSizeLow,
-                                          LPCSTR lpName)
+                                        PVOID lpFileMappingAttributes,
+                                        DWORD flProtect,
+                                        DWORD dwMaximumSizeHigh,
+                                        DWORD dwMaximumSizeLow,
+                                        LPCSTR lpName)
 {
     DebugLog("%p, %#x, %#x, %#x, [%s]", hFile, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
+    assert(!lpFileMappingAttributes);
+    assert(!lpName);
+
     Size.high = dwMaximumSizeHigh;
     Size.low = dwMaximumSizeLow;
 
-    MappedFileEntry *pMappedFileObjectEntry = (MappedFileEntry*) calloc(1, sizeof(MappedFileEntry));
+    // This assumes the file is only going to be accessed using memory-mapping.
+    // This will fail in case ReadFile/WriteFile is called on a mapped file.
+    fseek(hFile, Size.size, SEEK_SET);
 
-    int fd = fileno(hFile);
-    pMappedFileObjectEntry->fd = fd;
-
-    PVOID addr = mmap(NULL, Size.size, PROT_READ, MAP_PRIVATE, fd, 0);
-    pMappedFileObjectEntry->start = (intptr_t) addr;
-    pMappedFileObjectEntry->end = (intptr_t) addr + Size.size;
-    pMappedFileObjectEntry->size = Size.size;
-
-    if (addr == MAP_FAILED) {
-        DebugLog("[ERROR] failed to create file object mapping: %s", strerror(errno));
-        free(pMappedFileObjectEntry);
-        return INVALID_HANDLE_VALUE;
-    }
-
-    AddMappedFile(pMappedFileObjectEntry, &FileMappingList);
-
-    DebugLog("%p => %p", hFile, pMappedFileObjectEntry);
-
-    return pMappedFileObjectEntry;
+    return hFile;
 }
 
+STATIC HANDLE WINAPI CreateFileMappingW(HANDLE hFile,
+                                        PVOID lpFileMappingAttributes,
+                                        DWORD flProtect,
+                                        DWORD dwMaximumSizeHigh,
+                                        DWORD dwMaximumSizeLow,
+                                        LPCWSTR lpName)
+{
+    char *name = CreateAnsiFromWide(lpName);
+
+    HANDLE hMap = CreateFileMappingA(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, name);
+
+    free(name);
+    return hMap;
+}
+
+STATIC PVOID WINAPI MapViewOfFileEx(HANDLE hFileMappingObject,
+                                    DWORD dwDesiredAccess,
+                                    DWORD dwFileOffsetHigh,
+                                    DWORD dwFileOffsetLow,
+                                    SIZE_T dwNumberOfBytesToMap,
+                                    PVOID lpBaseAddress)
+
+{
+    DebugLog("%p, %#x, %#x, %#x, %#x, %p", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap, lpBaseAddress);
+
+    Offset.high = dwFileOffsetHigh;
+    Offset.low = dwFileOffsetLow;
+
+    int access = 0;
+    assert(!(dwDesiredAccess & 0x1));
+    if (dwDesiredAccess & 0x2) // FILE_MAP_WRITE
+        access |= PROT_WRITE;
+    if (dwDesiredAccess & 0x4) // FILE_MAP_READ
+        access |= PROT_READ;
+    if (dwDesiredAccess & 0x20) // FILE_MAP_EXECUTE
+        access |= PROT_EXEC;
+    if (!access)
+        access = PROT_NONE;
+    if (dwDesiredAccess & 0x20000000)
+        access |= MAP_HUGETLB;
+
+    MappedFileView *pFileView = calloc(1, sizeof(MappedFileView));
+    if (pFileView == NULL) {
+        DebugLog("[ERROR] failed to allocate view of file: %s ", strerror(errno));
+        return NULL;
+    }
+
+    int fd = fileno(hFileMappingObject);
+    SIZE_T size = dwNumberOfBytesToMap ? dwNumberOfBytesToMap : ftell(hFileMappingObject) - Offset.offset;
+    pFileView->base = mmap(lpBaseAddress, size, access, MAP_PRIVATE, fd, Offset.offset);
+    pFileView->size = size;
+    if (pFileView->base == MAP_FAILED) {
+        DebugLog("[ERROR] failed to create file view mapping: %s", strerror(errno));
+        free(pFileView);
+        return NULL;
+    }
+
+    AddMappedView(pFileView, &MappedFileViews);
+
+    return pFileView->base;
+}
 
 STATIC PVOID WINAPI MapViewOfFile(HANDLE hFileMappingObject,
                                   DWORD dwDesiredAccess,
@@ -402,27 +447,38 @@ STATIC PVOID WINAPI MapViewOfFile(HANDLE hFileMappingObject,
                                   DWORD dwFileOffsetLow,
                                   SIZE_T dwNumberOfBytesToMap)
 {
-    DebugLog("%p, %#x, %#x, %#x, %#x", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap);
+    return MapViewOfFileEx(hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap, 0);
+}
 
-    Offset.high = dwFileOffsetHigh;
-    Offset.low = dwFileOffsetLow;
+STATIC BOOL WINAPI FlushViewOfFile(PVOID lpBaseAddress,
+                                   SIZE_T dwNumberOfBytesToFlush)
+{
+    DebugLog("%p, %#x", lpBaseAddress,  dwNumberOfBytesToFlush);
 
-    MappedFileEntry *MappedFile = (MappedFileEntry*) hFileMappingObject;
-
-    PVOID FileView = malloc(dwNumberOfBytesToMap);
-    if (dwNumberOfBytesToMap == 0) {
-        dwNumberOfBytesToMap = MappedFile->size - Offset.offset;
-        FileView = realloc(FileView, dwNumberOfBytesToMap);
-
+    if (msync(lpBaseAddress, dwNumberOfBytesToFlush, MS_ASYNC) < 0) {
+        DebugLog("[ERROR] failed to sync %#x bytes in file view mapping %p: %s", dwNumberOfBytesToFlush, lpBaseAddress, strerror(errno));
+        return FALSE;
     }
-    if (FileView == NULL) {
-        DebugLog("[ERROR] failed to allocate view of file: %s ", strerror(errno));
-        return NULL;
+    return TRUE;
+}
+
+STATIC BOOL WINAPI UnmapViewOfFile(PVOID lpBaseAddress)
+{
+    DebugLog("%p", lpBaseAddress);
+
+    MappedFileView *pFileView = SearchMappedViews(lpBaseAddress, MappedFileViews);
+    if (!pFileView) {
+        DebugLog("[ERROR] no file view mapping found to unmap");
+        return FALSE;
     }
 
-    memcpy(FileView, (void*)MappedFile->start + Offset.offset, dwNumberOfBytesToMap);
+    if (munmap(pFileView->base, pFileView->size) < 0) {
+        DebugLog("[ERROR] failed to unmap file view mapping %p: %s", lpBaseAddress, strerror(errno));
+        return FALSE;
+    }
 
-    return FileView;
+    DeleteMappedView(pFileView, MappedFileViews);
+    return TRUE;
 }
 
 STATIC DWORD WINAPI NtOpenSymbolicLinkObject(PHANDLE LinkHandle, DWORD DesiredAccess, PVOID ObjectAttributes)
@@ -602,7 +658,11 @@ DECLARE_CRT_EXPORT("SetFileTime", SetFileTime);
 DECLARE_CRT_EXPORT("GetFileTime", GetFileTime);
 DECLARE_CRT_EXPORT("GetFileType", GetFileType);
 DECLARE_CRT_EXPORT("CreateFileMappingA", CreateFileMappingA);
+DECLARE_CRT_EXPORT("CreateFileMappingW", CreateFileMappingW);
 DECLARE_CRT_EXPORT("GetFileAttributesA", GetFileAttributesA);
 DECLARE_CRT_EXPORT("MapViewOfFile", MapViewOfFile);
+DECLARE_CRT_EXPORT("MapViewOfFileEx", MapViewOfFileEx);
+DECLARE_CRT_EXPORT("FlushViewOfFile", FlushViewOfFile);
+DECLARE_CRT_EXPORT("UnmapViewOfFile", UnmapViewOfFile);
 DECLARE_CRT_EXPORT("DeleteFileA", DeleteFileA);
 DECLARE_CRT_EXPORT("NtCreateFile", NtCreateFile);

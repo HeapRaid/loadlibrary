@@ -18,7 +18,7 @@
 
 #include "strings.h"
 
-char *string_from_wchar(void *wcharbuf, size_t len)
+char *string_from_wchar(const void *wcharbuf, size_t len)
 {
     uint16_t *inbuf = wcharbuf;
     uint8_t *outbuf = NULL;
