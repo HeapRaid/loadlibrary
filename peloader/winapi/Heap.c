@@ -51,6 +51,11 @@ STATIC BOOL WINAPI HeapFree(HANDLE hHeap, DWORD dwFlags, PVOID lpMem)
     return TRUE;
 }
 
+STATIC BOOL WINAPI HeapDestroy(HANDLE hHeap)
+{
+    return hHeap == (HANDLE)'HEAP';
+}
+
 STATIC BOOL WINAPI RtlFreeHeap(PVOID HeapHandle, ULONG Flags, PVOID BaseAddress)
 {
     //DebugLog("%p, %#x, %p", HeapHandle, Flags, BaseAddress);
@@ -150,6 +155,7 @@ STATIC PVOID WINAPI RtlReAllocateHeap(HANDLE hHeap, ULONG uFlags, PVOID ptr, SIZ
 }
 
 DECLARE_CRT_EXPORT("HeapCreate", HeapCreate);
+DECLARE_CRT_EXPORT("HeapDestroy", HeapDestroy);
 DECLARE_CRT_EXPORT("GetProcessHeap", GetProcessHeap);
 DECLARE_CRT_EXPORT("HeapAlloc", HeapAlloc);
 DECLARE_CRT_EXPORT("HeapFree", HeapFree);
