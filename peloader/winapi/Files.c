@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "winnt_types.h"
 #include "codealloc.h"
@@ -646,6 +647,19 @@ STATIC DWORD WINAPI GetFileType(HANDLE hFile)
     return FILE_TYPE_DISK;
 }
 
+STATIC DWORD WINAPI GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, LPSTR *lpFilePart)
+{
+    if (nBufferLength < PATH_MAX)
+        return PATH_MAX;
+
+    char* result = realpath(lpFileName, lpBuffer);
+    if (!result)
+        return 0;
+    if (lpFilePart)
+        *lpFilePart = basename(result);
+    return strlen(result);
+}
+
 DECLARE_CRT_EXPORT("VerQueryValueW", VerQueryValueW);
 DECLARE_CRT_EXPORT("GetFileVersionInfoExW", GetFileVersionInfoExW);
 DECLARE_CRT_EXPORT("GetFileVersionInfoSizeExW", GetFileVersionInfoSizeExW);
@@ -686,3 +700,4 @@ DECLARE_CRT_EXPORT("UnmapViewOfFile", UnmapViewOfFile);
 DECLARE_CRT_EXPORT("DeleteFileA", DeleteFileA);
 DECLARE_CRT_EXPORT("NtCreateFile", NtCreateFile);
 DECLARE_CRT_EXPORT("CreateFile2", CreateFile2);
+DECLARE_CRT_EXPORT("GetFullPathNameA", GetFullPathNameA);
