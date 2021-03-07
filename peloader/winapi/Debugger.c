@@ -24,4 +24,10 @@ static BOOL WINAPI IsDebuggerPresent()
     return false;
 }
 
+static void WINAPI OutputDebugStringA(LPCSTR lpOutputString)
+{
+    DebugLog(lpOutputString);
+}
+
 DECLARE_CRT_EXPORT("IsDebuggerPresent", IsDebuggerPresent);
+DECLARE_CRT_EXPORT("OutputDebugStringA", OutputDebugStringA);
