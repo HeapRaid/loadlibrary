@@ -2,9 +2,11 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdbool.h>
+#include <ctype.h>
 #include <search.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <dlfcn.h>
 
 #include "winnt_types.h"
 #include "pe_linker.h"
@@ -14,19 +16,41 @@
 #include "util.h"
 #include "winstrings.h"
 
+static HANDLE WINAPI LoadLibraryA(PCHAR lpFileName)
+{
+    // Translate path seperator.
+    while (strchr(lpFileName, '\\'))
+        *strchr(lpFileName, '\\') = '/';
 
-static HANDLE WINAPI LoadLibraryExW(PVOID lpFileName, HANDLE hFile, DWORD dwFlags)
+    // I'm just going to tolower() everything.
+    for (char *t = lpFileName; *t; t++)
+        *t = tolower(*t);
+
+    // Change the extension to so
+    for (char *t = strrchr(lpFileName, '.'), i = 0;
+        i < 4 && t && *t; t++, i++)
+        *t = ".so"[i];
+
+    HANDLE hModule = dlopen(lpFileName, RTLD_NOW);
+    if (!hModule)
+        DebugLog("FIXME: Failed to load %s", lpFileName);
+    return hModule;
+}
+
+static HANDLE WINAPI LoadLibraryExW(PWCHAR lpFileName, HANDLE hFile, DWORD dwFlags)
 {
     char *name = CreateAnsiFromWide(lpFileName);
 
     DebugLog("%p [%s], %p, %#x", lpFileName, name, hFile, dwFlags);
 
+    HANDLE hModule = LoadLibraryA(name);
+
     free(name);
 
-    return (HANDLE) 'LOAD';
+    return hModule;
 }
 
-static HANDLE WINAPI LoadLibraryW(PVOID lpFileName)
+static HANDLE WINAPI LoadLibraryW(PWCHAR lpFileName)
 {
     DebugLog("%p", lpFileName);
 
@@ -37,10 +61,18 @@ static PVOID WINAPI GetProcAddress(HANDLE hModule, PCHAR lpProcName)
 {
     ENTRY key = { lpProcName }, *item;
 
-    assert(hModule == (HANDLE) NULL || hModule == (HANDLE) 'LOAD' || hModule == (HANDLE) 'MPEN' || hModule == (HANDLE) 'VERS' || hModule == (HANDLE) 'KERN');
-
-    if (hsearch_r(key, FIND, &item, &crtexports)) {
-        return item->data;
+    if (hModule == (HANDLE) NULL || hModule == (HANDLE) 'LOAD' || hModule == (HANDLE) 'MPEN' || hModule == (HANDLE) 'VERS' || hModule == (HANDLE) 'KERN')
+    {
+        if (hsearch_r(key, FIND, &item, &crtexports)) {
+            return item->data;
+        }
+    }
+    else if ((ULONG_PTR)lpProcName >> 16) // Ignore ordinals
+    {
+        PVOID ptr = dlsym(hModule, lpProcName);
+        if (ptr) {
+            return ptr;
+        }
     }
 
     DebugLog("FIXME: %s unresolved", lpProcName);
@@ -48,29 +80,10 @@ static PVOID WINAPI GetProcAddress(HANDLE hModule, PCHAR lpProcName)
     return NULL;
 }
 
-static HANDLE WINAPI GetModuleHandleW(PVOID lpModuleName)
+static VOID WINAPI FreeLibrary(PVOID hLibModule)
 {
-    char *name = CreateAnsiFromWide(lpModuleName);
-
-    DebugLog("%p [%s]", lpModuleName, name);
-
-    free(name);
-
-    if (lpModuleName && memcmp(lpModuleName, L"mpengine.dll", sizeof(L"mpengine.dll")) == 0)
-        return (HANDLE) 'MPEN';
-
-    if (lpModuleName && memcmp(lpModuleName, L"bcrypt.dll", sizeof(L"bcrypt.dll")) == 0)
-        return (HANDLE) 'LOAD';
-
-    if (lpModuleName && memcmp(lpModuleName, L"KERNEL32.DLL", sizeof(L"KERNEL32.DLL")) == 0)
-        return (HANDLE) 'KERN';
-
-    if (lpModuleName && memcmp(lpModuleName, L"kernel32.dll", sizeof(L"kernel32.dll")) == 0)
-        return (HANDLE) 'KERN';
-
-    if (lpModuleName && memcmp(lpModuleName, L"version.dll", sizeof(L"version.dll")) == 0)
-        return (HANDLE) 'VERS';
-    return (HANDLE) NULL;
+    DebugLog("FreeLibrary(%p)", hLibModule);
+    dlclose(hLibModule);
 }
 
 static DWORD WINAPI GetModuleFileNameA(HANDLE hModule, PCHAR lpFilename, DWORD nSize)
@@ -97,17 +110,55 @@ static HANDLE WINAPI GetModuleHandleA(PCHAR lpModuleName)
 {
     DebugLog("%p [%s]", lpModuleName, lpModuleName);
 
-    return (HANDLE) NULL;
+    if (lpModuleName && memcmp(lpModuleName, L"mpengine.dll", sizeof(L"mpengine.dll")) == 0)
+        return (HANDLE) 'MPEN';
+
+    if (lpModuleName && memcmp(lpModuleName, L"bcrypt.dll", sizeof(L"bcrypt.dll")) == 0)
+        return (HANDLE) 'LOAD';
+
+    if (lpModuleName && memcmp(lpModuleName, L"KERNEL32.DLL", sizeof(L"KERNEL32.DLL")) == 0)
+        return (HANDLE) 'KERN';
+
+    if (lpModuleName && memcmp(lpModuleName, L"kernel32.dll", sizeof(L"kernel32.dll")) == 0)
+        return (HANDLE) 'KERN';
+
+    if (lpModuleName && memcmp(lpModuleName, L"version.dll", sizeof(L"version.dll")) == 0)
+        return (HANDLE) 'VERS';
+
+    // Change the extension to so
+    for (char *t = strrchr(lpModuleName, '.'), i = 0;
+        i < 4 && t && *t; t++, i++)
+        *t = ".so"[i];
+
+    HANDLE hModule = dlopen(lpModuleName, RTLD_NOLOAD);
+    if (lpModuleName)
+    {
+        if (hModule)
+            dlclose(hModule); // Restore refcount
+        else
+            DebugLog("FIXME: Module %s not found", lpModuleName);
+    }
+
+    return hModule;
 }
 
-static VOID WINAPI FreeLibrary(PVOID hLibModule)
+static HANDLE WINAPI GetModuleHandleW(PVOID lpModuleName)
 {
-    DebugLog("FreeLibrary(%p)", hLibModule);
+    char *name = CreateAnsiFromWide(lpModuleName);
+
+    DebugLog("%p [%s]", lpModuleName, name);
+
+    HANDLE hModule = GetModuleHandleA(lpModuleName);
+
+    free(name);
+
+    return hModule;
 }
 
 DECLARE_CRT_EXPORT("FreeLibrary", FreeLibrary);
 DECLARE_CRT_EXPORT("LoadLibraryExW", LoadLibraryExW);
 DECLARE_CRT_EXPORT("LoadLibraryW", LoadLibraryW);
+DECLARE_CRT_EXPORT("LoadLibraryA", LoadLibraryA);
 DECLARE_CRT_EXPORT("GetProcAddress", GetProcAddress);
 DECLARE_CRT_EXPORT("GetModuleHandleW", GetModuleHandleW);
 DECLARE_CRT_EXPORT("GetModuleHandleA", GetModuleHandleA);
