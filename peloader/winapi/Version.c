@@ -50,9 +50,9 @@ static DWORD WINAPI RtlGetVersion(PRTL_OSVERSIONINFOEXW lpVersionInformation)
                  lpVersionInformation->dwOSVersionInfoSize);
     }
 
-    // Windows XP
-    lpVersionInformation->dwMajorVersion = 5;
-    lpVersionInformation->dwMinorVersion = 1;
+    // Windows 8
+    lpVersionInformation->dwMajorVersion = 6;
+    lpVersionInformation->dwMinorVersion = 2;
 
     return STATUS_SUCCESS;
 }
@@ -103,8 +103,12 @@ static BOOL WINAPI GetProductInfo(DWORD dwOSMajorVersion,
 
 static DWORD WINAPI GetVersion(void)
 {
-    DebugLog("");
-    return 0x80000000;
+    RTL_OSVERSIONINFOEXW VersionInfo = { 0 };
+    if (RtlGetVersion(&VersionInfo) != STATUS_SUCCESS)
+        return 0;
+
+    // Major version is in lower order byte
+    return (VersionInfo.dwMinorVersion << 8) | VersionInfo.dwMajorVersion;
 }
 
 static DWORD WINAPI GetVersionExA(PRTL_OSVERSIONINFOEXW lpVersionInformation)
