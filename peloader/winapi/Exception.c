@@ -170,6 +170,35 @@ static WINAPI void RtlUnwind(PEXCEPTION_FRAME TargetFrame, PVOID TargetIp, PEXCE
     __debugbreak();
 }
 
+typedef LONG (WINAPI *PTOP_LEVEL_EXCEPTION_FILTER)(PVOID ExceptionInfo);
+
+STATIC PTOP_LEVEL_EXCEPTION_FILTER top_filter = NULL;
+
+STATIC LONG WINAPI UnhandledExceptionFilter(PVOID ExceptionInfo)
+{
+    if (top_filter)
+    {
+        return top_filter(ExceptionInfo);
+    }
+    return 0;
+}
+
+STATIC PTOP_LEVEL_EXCEPTION_FILTER WINAPI SetUnhandledExceptionFilter(PTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExceptionFilter)
+{
+    return __atomic_exchange_n(&top_filter, lpTopLevelExceptionFilter, __ATOMIC_SEQ_CST);
+}
+
+STATIC void WINAPI _CxxThrowException(void* pObj, void* pInfo)
+{
+    ULONG_PTR args[3];
+    args[0] = 0x19930520;
+    args[1] = (ULONG_PTR)pObj;
+    args[2] = (ULONG_PTR)pInfo;
+    RaiseException(0xE06D7363, 1, 3, args);
+}
 
 DECLARE_CRT_EXPORT("RaiseException", RaiseException);
 DECLARE_CRT_EXPORT("RtlUnwind", RtlUnwind);
+DECLARE_CRT_EXPORT("UnhandledExceptionFilter", UnhandledExceptionFilter);
+DECLARE_CRT_EXPORT("SetUnhandledExceptionFilter", SetUnhandledExceptionFilter);
+DECLARE_CRT_EXPORT("_CxxThrowException", _CxxThrowException);
