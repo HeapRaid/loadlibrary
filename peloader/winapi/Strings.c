@@ -148,6 +148,11 @@ STATIC INT WINAPI UuidCreate(PBYTE Uuid)
     return 0;
 }
 
+static int WINAPI lstrcmpiA(LPCSTR lpString1, LPCSTR lpString2)
+{
+    return strcasecmp(lpString1, lpString2);
+}
+
 DECLARE_CRT_EXPORT("MultiByteToWideChar", MultiByteToWideChar);
 DECLARE_CRT_EXPORT("WideCharToMultiByte", WideCharToMultiByte);
 DECLARE_CRT_EXPORT("GetStringTypeA", GetStringTypeA);
@@ -155,4 +160,5 @@ DECLARE_CRT_EXPORT("GetStringTypeW", GetStringTypeW);
 DECLARE_CRT_EXPORT("RtlInitUnicodeString", RtlInitUnicodeString);
 DECLARE_CRT_EXPORT("UuidFromStringW", UuidFromStringW);
 DECLARE_CRT_EXPORT("UuidCreate", UuidCreate);
+DECLARE_CRT_EXPORT("lstrcmpiA", lstrcmpiA);
 
