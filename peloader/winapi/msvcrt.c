@@ -45,6 +45,18 @@
 #include "util.h"
 #include "winstrings.h"
 
+/* fpclass constants */
+#define MSVCRT__FPCLASS_SNAN 0x0001  /* Signaling "Not a Number" */
+#define MSVCRT__FPCLASS_QNAN 0x0002  /* Quiet "Not a Number" */
+#define MSVCRT__FPCLASS_NINF 0x0004  /* Negative Infinity */
+#define MSVCRT__FPCLASS_NN   0x0008  /* Negative Normal */
+#define MSVCRT__FPCLASS_ND   0x0010  /* Negative Denormal */
+#define MSVCRT__FPCLASS_NZ   0x0020  /* Negative Zero */
+#define MSVCRT__FPCLASS_PZ   0x0040  /* Positive Zero */
+#define MSVCRT__FPCLASS_PD   0x0080  /* Positive Denormal */
+#define MSVCRT__FPCLASS_PN   0x0100  /* Positive Normal */
+#define MSVCRT__FPCLASS_PINF 0x0200  /* Positive Infinity */
+
 #define MSVCRT__SW_INEXACT      0x00000001 /* inexact (precision) */
 #define MSVCRT__SW_UNDERFLOW    0x00000002 /* underflow */
 #define MSVCRT__SW_OVERFLOW     0x00000004 /* overflow */
@@ -333,16 +345,112 @@ static unsigned int _clearfp(void)
     return flags;
 }
 
-static int _fpclass(double x)
+static int _fpclass(double num)
 {
-    switch (fpclassify(x))
+    switch (fpclassify( num ))
     {
-        case FP_NAN: return 0x2;
-        case FP_INFINITE: return signbit(x) ? 0x4 : 0x200;
-        case FP_SUBNORMAL: return signbit(x) ? 0x10 : 0x80;
-        case FP_ZERO: return signbit(x) ? 0x20 : 0x40;
-        default: return signbit(x) ? 0x8 : 0x100;
+        case FP_NAN: return MSVCRT__FPCLASS_QNAN;
+        case FP_INFINITE: return signbit(num) ? MSVCRT__FPCLASS_NINF : MSVCRT__FPCLASS_PINF;
+        case FP_SUBNORMAL: return signbit(num) ?MSVCRT__FPCLASS_ND : MSVCRT__FPCLASS_PD;
+        case FP_ZERO: return signbit(num) ? MSVCRT__FPCLASS_NZ : MSVCRT__FPCLASS_PZ;
     }
+    return signbit(num) ? MSVCRT__FPCLASS_NN : MSVCRT__FPCLASS_PN;
+}
+
+#define FPU_DOUBLE(var) double var; \
+    __asm__ __volatile__( "fstpl %0;fwait" : "=m" (var) : )
+#define FPU_DOUBLES(var1,var2) double var1,var2; \
+    __asm__ __volatile__( "fstpl %0;fwait" : "=m" (var2) : ); \
+    __asm__ __volatile__( "fstpl %0;fwait" : "=m" (var1) : )
+
+static double _CIfmod(void)
+{
+    FPU_DOUBLES(x,y);
+    return fmod(x,y);
+}
+
+static double _CItanh(void)
+{
+    FPU_DOUBLE(x);
+    return tanh(x);
+}
+
+static double _CItan(void)
+{
+    FPU_DOUBLE(x);
+    return tan(x);
+}
+
+static double _CIsinh(void)
+{
+    FPU_DOUBLE(x);
+    return sinh(x);
+}
+
+static double _CIsin(void)
+{
+    FPU_DOUBLE(x);
+    return sin(x);
+}
+
+static double _CIlog(void)
+{
+    FPU_DOUBLE(x);
+    return log(x);
+}
+
+static double _CIpow(void)
+{
+    FPU_DOUBLES(x,y);
+    return pow(x,y);
+}
+
+static double _CIexp(void)
+{
+    FPU_DOUBLE(x);
+    return exp(x);
+}
+
+static double _CIsqrt(void)
+{
+    FPU_DOUBLE(x);
+    return sqrt(x);
+}
+
+static double _CIcosh(void)
+{
+    FPU_DOUBLE(x);
+    return cosh(x);
+}
+
+static double _CIcos(void)
+{
+    FPU_DOUBLE(x);
+    return cos(x);
+}
+
+static double _CIatan2(void)
+{
+    FPU_DOUBLES(x,y);
+    return atan2(x,y);
+}
+
+static double _CIatan(void)
+{
+    FPU_DOUBLE(x);
+    return atan(x);
+}
+
+static double _CIasin(void)
+{
+    FPU_DOUBLE(x);
+    return asin(x);
+}
+
+static double _CIacos(void)
+{
+    FPU_DOUBLE(x);
+    return acos(x);
 }
 
 static size_t _mbstrlen (const char *s)
@@ -401,21 +509,21 @@ DECLARE_CRT_EXPORT("_strnicmp", strncasecmp);
 DECLARE_CRT_EXPORT("_finite", finite);
 DECLARE_CRT_EXPORT("floor", floor);
 DECLARE_CRT_EXPORT("_fpclass", _fpclass);
-DECLARE_CRT_EXPORT("_CIfmod", fmod);
-DECLARE_CRT_EXPORT("_CItanh", tanh);
-DECLARE_CRT_EXPORT("_CItan", tan);
-DECLARE_CRT_EXPORT("_CIsinh", sinh);
-DECLARE_CRT_EXPORT("_CIsin", sin);
-DECLARE_CRT_EXPORT("_CIlog", log);
-DECLARE_CRT_EXPORT("_CIpow", pow);
-DECLARE_CRT_EXPORT("_CIexp", exp);
-DECLARE_CRT_EXPORT("_CIsqrt", sqrt);
-DECLARE_CRT_EXPORT("_CIcosh", cosh);
-DECLARE_CRT_EXPORT("_CIcos", cos);
-DECLARE_CRT_EXPORT("_CIatan2", atan2);
-DECLARE_CRT_EXPORT("_CIatan", atan);
-DECLARE_CRT_EXPORT("_CIasin", asin);
-DECLARE_CRT_EXPORT("_CIacos", acos);
+DECLARE_CRT_EXPORT("_CIfmod", _CIfmod);
+DECLARE_CRT_EXPORT("_CItanh", _CItanh);
+DECLARE_CRT_EXPORT("_CItan", _CItan);
+DECLARE_CRT_EXPORT("_CIsinh", _CIsinh);
+DECLARE_CRT_EXPORT("_CIsin", _CIsin);
+DECLARE_CRT_EXPORT("_CIlog", _CIlog);
+DECLARE_CRT_EXPORT("_CIpow", _CIpow);
+DECLARE_CRT_EXPORT("_CIexp", _CIexp);
+DECLARE_CRT_EXPORT("_CIsqrt", _CIsqrt);
+DECLARE_CRT_EXPORT("_CIcosh", _CIcosh);
+DECLARE_CRT_EXPORT("_CIcos", _CIcos);
+DECLARE_CRT_EXPORT("_CIatan2", _CIatan2);
+DECLARE_CRT_EXPORT("_CIatan", _CIatan);
+DECLARE_CRT_EXPORT("_CIasin", _CIasin);
+DECLARE_CRT_EXPORT("_CIacos", _CIacos);
 DECLARE_CRT_EXPORT("atof", atof);
 DECLARE_CRT_EXPORT("_mbstrlen", _mbstrlen);
 DECLARE_CRT_EXPORT("modf", modf);
