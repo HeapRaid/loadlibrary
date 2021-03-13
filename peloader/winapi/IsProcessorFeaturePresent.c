@@ -25,14 +25,14 @@ BOOL WINAPI IsProcessorFeaturePresent(DWORD ProcessorFeature)
 
     switch (ProcessorFeature) {
         case PF_XMMI_INSTRUCTIONS_AVAILABLE:
-            return edx & bit_SSE;
+            return (edx & bit_SSE) != 0;
         case PF_XMMI64_INSTRUCTIONS_AVAILABLE:
-            return edx & bit_SSE2;
+            return (edx & bit_SSE2) != 0;
         case PF_FLOATING_POINT_PRECISION_ERRATA:
             DebugLog("IsProcessorFeaturePresent(%u) => FALSE", ProcessorFeature);
             return FALSE;
         case PF_MMX_INSTRUCTIONS_AVAILABLE:
-            return edx & bit_MMX;
+            return (edx & bit_MMX) != 0;
         case PF_FASTFAIL_AVAILABLE: // NOTE: this will cause int 0x29
             DebugLog("IsProcessorFeaturePresent(%u) => TRUE", ProcessorFeature);
             return TRUE;
