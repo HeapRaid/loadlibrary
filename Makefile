@@ -5,7 +5,7 @@ LDLIBS  = intercept/libdisasm.a -Wl,--whole-archive,peloader/libpeloader.a,--no-
 
 .PHONY: clean peloader intercept
 
-TARGETS=mpclient | peloader
+TARGETS=fxc | peloader
 
 all: $(TARGETS)
 	-mkdir -p faketemp
@@ -18,7 +18,7 @@ peloader:
 
 intercept/hook.o: intercept
 
-mpclient: mpclient.o intercept/hook.o | peloader
+fxc: fxc.o intercept/hook.o | peloader
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS) $(LDFLAGS)
 
 clean:

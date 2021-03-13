@@ -4,8 +4,6 @@
 *.dll
 *.vdm
 *.exe
-mpclient
-avscript
-eicar.com
+fxc
 .gradle/
 .idea/
