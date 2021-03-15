@@ -38,6 +38,7 @@
 #include <unistd.h>
 #include <mcheck.h>
 #include <err.h>
+#include <getopt.h>
 
 #include "winnt_types.h"
 #include "pe_linker.h"
@@ -45,11 +46,6 @@
 #include "util.h"
 #include "hook.h"
 #include "log.h"
-#include "rsignal.h"
-#include "engineboot.h"
-#include "scanreply.h"
-#include "streambuffer.h"
-#include "openscan.h"
 
 // Any usage limits to prevent bugs disrupting system.
 const struct rlimit kUsageLimits[] = {
@@ -59,82 +55,243 @@ const struct rlimit kUsageLimits[] = {
     [RLIMIT_NOFILE] = { .rlim_cur = 32,         .rlim_max = 32 },
 };
 
-DWORD (* __rsignal)(PHANDLE KernelHandle, DWORD Code, PVOID Params, DWORD Size);
-
-static DWORD EngineScanCallback(PSCANSTRUCT Scan)
+typedef struct _D3D_SHADER_MACRO
 {
-    if (Scan->Flags & SCAN_MEMBERNAME) {
-        LogMessage("Scanning archive member %s", Scan->VirusName);
-    }
-    if (Scan->Flags & SCAN_FILENAME) {
-        LogMessage("Scanning %s", Scan->FileName);
-    }
-    if (Scan->Flags & SCAN_PACKERSTART) {
-        LogMessage("Packer %s identified.", Scan->VirusName);
-    }
-    if (Scan->Flags & SCAN_ENCRYPTED) {
-        LogMessage("File is encrypted.");
-    }
-    if (Scan->Flags & SCAN_CORRUPT) {
-        LogMessage("File may be corrupt.");
-    }
-    if (Scan->Flags & SCAN_FILETYPE) {
-        LogMessage("File %s is identified as %s", Scan->FileName, Scan->VirusName);
-    }
-    if (Scan->Flags & 0x08000022) {
-        LogMessage("Threat %s identified.", Scan->VirusName);
-    }
-    // This may indicate PUA.
-    if ((Scan->Flags & 0x40010000) == 0x40010000) {
-        LogMessage("Threat %s identified.", Scan->VirusName);
-    }
-    return 0;
+    LPCSTR Name;
+    LPCSTR Definition;
+} D3D_SHADER_MACRO;
+
+typedef GUID IID;
+typedef const IID* REFIID;
+
+typedef struct ID3D10Blob ID3D10Blob;
+typedef struct ID3D10BlobVtbl
+{
+    HRESULT (*QueryInterface )(
+        ID3D10Blob * This,
+        /* [in] */ REFIID riid,
+        /* [annotation][iid_is][out] */
+        void **ppvObject);
+    ULONG (*AddRef )(
+        ID3D10Blob * This);
+    ULONG (*Release )(
+        ID3D10Blob * This);
+    void* (*GetBufferPointer )(
+        ID3D10Blob * This);
+    SIZE_T (*GetBufferSize )(
+        ID3D10Blob * This);
+} ID3D10BlobVtbl;
+
+struct ID3D10Blob
+{
+    const struct ID3D10BlobVtbl *lpVtbl;
+};
+
+typedef struct ID3D10Blob ID3DBlob;
+typedef struct ID3D10Include ID3DInclude;
+
+#define ID3D10Blob_QueryInterface(This,riid,ppvObject)  \
+    ( (This)->lpVtbl -> QueryInterface(This,riid,ppvObject) )
+
+#define ID3D10Blob_AddRef(This) \
+    ( (This)->lpVtbl -> AddRef(This) )
+
+#define ID3D10Blob_Release(This)    \
+    ( (This)->lpVtbl -> Release(This) )
+
+
+#define ID3D10Blob_GetBufferPointer(This)   \
+    ( (This)->lpVtbl -> GetBufferPointer(This) )
+
+#define ID3D10Blob_GetBufferSize(This)  \
+    ( (This)->lpVtbl -> GetBufferSize(This) )
+
+#define D3D_COMPILE_STANDARD_FILE_INCLUDE ((ID3DInclude*)(uintptr_t)1)
+HRESULT (WINAPI* D3DCompile)(
+    PVOID                  pSrcData,
+    SIZE_T                 SrcDataSize,
+    LPCSTR                 pSourceName,
+    const D3D_SHADER_MACRO *pDefines,
+    ID3DInclude            *pInclude,
+    LPCSTR                 pEntrypoint,
+    LPCSTR                 pTarget,
+    UINT                   Flags1,
+    UINT                   Flags2,
+    ID3DBlob               **ppCode,
+    ID3DBlob               **ppErrorMsgs
+);
+
+void print_usage()
+{
+    printf("Usage: fxc <options> <files>\n");
+    printf("\n");
+    printf("   -?, -help           print this message\n");
+    printf("\n");
+    printf("   -T <profile>        target profile\n");
+    printf("   -E <name>           entrypoint name\n");
+//  printf("   -I <include>        additional include path\n");
+//  printf("   -Vi                 display details about the include process\n");
+//  printf("\n");
+//  printf("   -Od                 disable optimizations\n");
+//  printf("   -Op                 disable preshaders\n");
+//  printf("   -O{0,1,2,3}         optimization level 0..3.  1 is default\n");
+//  printf("   -WX                 treat warnings as errors\n");
+//  printf("   -Vd                 disable validation\n");
+//  printf("   -Zi                 enable debugging information\n");
+//  printf("   -Zss                debug name with source information\n");
+//  printf("   -Zsb                debug name with only binary information\n");
+//  printf("   -Zpr                pack matrices in row-major order\n");
+//  printf("   -Zpc                pack matrices in column-major order\n");
+//  printf("\n");
+//  printf("   -Gpp                force partial precision\n");
+//  printf("   -Gfa                avoid flow control constructs\n");
+//  printf("   -Gfp                prefer flow control constructs\n");
+//  printf("   -Gdp                disable effect performance mode\n");
+//  printf("   -Ges                enable strict mode\n");
+//  printf("   -Gec                enable backwards compatibility mode\n");
+//  printf("   -Gis                force IEEE strictness\n");
+//  printf("   -Gch                compile as a child effect for FX 4.x targets\n");
+    printf("\n");
+    printf("   -Fo <file>          output object file\n");
+//  printf("   -Fl <file>          output a library\n");
+//  printf("   -Fc <file>          output assembly code listing file\n");
+//  printf("   -Fx <file>          output assembly code and hex listing file\n");
+//  printf("   -Fh <file>          output header file containing object code\n");
+//  printf("   -Fe <file>          output warnings and errors to a specific file\n");
+//  printf("   -Fd <file>          extract shader PDB and write to given file\n");
+//  printf("   -Vn <name>          use <name> as variable name in header file\n");
+//  printf("   -Cc                 output color coded assembly listings\n");
+//  printf("   -Ni                 output instruction numbers in assembly listings\n");
+//  printf("   -No                 output instruction byte offset in assembly listings\n");
+//  printf("   -Lx                 output hexadecimal literals\n");
+//  printf("\n");
+//  printf("   -P <file>           preprocess to file (must be used alone)\n");
+//  printf("\n");
+//  printf("   @<file>             options response file\n");
+//  printf("   -dumpbin            load a binary file rather than compiling\n");
+//  printf("   -Qstrip_reflect     strip reflection data from 4_0+ shader bytecode\n");
+//  printf("   -Qstrip_debug       strip debug information from 4_0+ shader bytecode\n");
+//  printf("   -Qstrip_priv        strip private data from 4_0+ shader bytecode\n");
+//  printf("   -Qstrip_rootsignature         strip root signature from shader bytecode\n");
+//  printf("\n");
+//  printf("   -setrootsignature <file>      attach root signature to shader bytecode\n");
+//  printf("   -extractrootsignature <file>  extract root signature from shader bytecode\n");
+//  printf("   -verifyrootsignature <file>   verify shader bytecode against root signature\n");
+//  printf("\n");
+//  printf("   -compress           compress DX10 shader bytecode from files\n");
+//  printf("   -decompress         decompress bytecode from first file, output files should\n");
+//  printf("                       be listed in the order they were in during compression\n");
+//  printf("\n");
+//  printf("   -shtemplate <file>  template shader file for merging/matching resources\n");
+//  printf("   -mergeUAVs          merge UAV slots of template shader and current shader\n");
+//  printf("   -matchUAVs          match template shader UAV slots in current shader\n");
+//  printf("   -res_may_alias      assume that UAVs/SRVs may alias for cs_5_0+\n");
+//  printf("   -enable_unbounded_descriptor_tables  enables unbounded descriptor tables\n");
+//  printf("   -all_resources_bound  enable aggressive flattening in SM5.1+\n");
+//  printf("\n");
+//  printf("   -setprivate <file>  private data to add to compiled shader blob\n");
+//  printf("   -getprivate <file>  save private data from shader blob\n");
+//  printf("   -force_rootsig_ver <profile>  force root signature version (rootsig_1_1 if omitted)\n");
+//  printf("\n");
+//  printf("   -D <id>=<text>      define macro\n");
+    printf("   -LD <version>       Load specified D3DCompiler version\n");
+//  printf("   -nologo             suppress copyright message\n");
+    printf("\n");
+    printf("   <profile>: cs_4_0 cs_4_1 cs_5_0 cs_5_1 ds_5_0 ds_5_1 gs_4_0 gs_4_1 gs_5_0\n");
+    printf("      gs_5_1 hs_5_0 hs_5_1 lib_4_0 lib_4_1 lib_4_0_level_9_1\n");
+    printf("      lib_4_0_level_9_1_vs_only lib_4_0_level_9_1_ps_only lib_4_0_level_9_3\n");
+    printf("      lib_4_0_level_9_3_vs_only lib_4_0_level_9_3_ps_only lib_5_0 ps_2_0\n");
+    printf("      ps_2_a ps_2_b ps_2_sw ps_3_0 ps_3_sw ps_4_0 ps_4_0_level_9_1\n");
+    printf("      ps_4_0_level_9_3 ps_4_0_level_9_0 ps_4_1 ps_5_0 ps_5_1 rootsig_1_0\n");
+    printf("      rootsig_1_1 tx_1_0 vs_1_1 vs_2_0 vs_2_a vs_2_sw vs_3_0 vs_3_sw vs_4_0\n");
+    printf("      vs_4_0_level_9_1 vs_4_0_level_9_3 vs_4_0_level_9_0 vs_4_1 vs_5_0 vs_5_1\n");
+    printf("\n");
+    exit(0);
 }
 
-static DWORD ReadStream(PVOID this, ULONGLONG Offset, PVOID Buffer, DWORD Size, PDWORD SizeRead)
+void print_error(const char* format, ...)
 {
-    fseek(this, Offset, SEEK_SET);
-    *SizeRead = fread(Buffer, 1, Size, this);
-    return TRUE;
+    fprintf(stderr, "\033[0;31m");
+    va_list ap;
+    va_start(ap, format);
+        vfprintf(stderr, format, ap);
+    va_end(ap);
+    fprintf(stderr, "%s\033[0m\n", ", use -? to get usage information");
+    exit(1);
 }
 
-static DWORD GetStreamSize(PVOID this, PULONGLONG FileSize)
-{
-    fseek(this, 0, SEEK_END);
-    *FileSize = ftell(this);
-    return TRUE;
-}
-
-static PWCHAR GetStreamName(PVOID this)
-{
-    return L"input";
-}
-
-// These are available for pintool.
-BOOL __noinline InstrumentationCallback(PVOID ImageStart, SIZE_T ImageSize)
-{
-    // Prevent the call from being optimized away.
-    asm volatile ("");
-    return TRUE;
-}
-
-int main(int argc, char **argv, char **envp)
+int main(int argc, char **argv)
 {
     PIMAGE_DOS_HEADER DosHeader;
     PIMAGE_NT_HEADERS PeHeader;
-    HANDLE KernelHandle;
-    SCAN_REPLY ScanReply;
-    BOOTENGINE_PARAMS BootParams;
-    SCANSTREAM_PARAMS ScanParams;
-    STREAMBUFFER_DESCRIPTOR ScanDescriptor;
-    ENGINE_INFO EngineInfo;
-    ENGINE_CONFIG EngineConfig;
+    int c, optionIndex;
+    int inputFile = -1, objectFile = -1, headerFile = -1;
+    LPCSTR target = NULL, entryPoint = NULL;
+    ID3DBlob *pCode = NULL, *pError = NULL;
+    HRESULT hr = 1;
     struct pe_image image = {
         .entry  = NULL,
-        .name   = "engine/mpengine.dll",
+        .name   = "engine/D3DCompiler_43.dll",
     };
+    struct option longOptions[] = {
+        {"help", no_argument, NULL, '?'},
+        {0, 0, 0, 0}
+    };
+    
+    while ((c = getopt_long_only(argc, argv, "T:E:I:V:O:W:Z:G:F:C:N:L:P:Q:D:?", longOptions, &optionIndex)) != -1) {
+        switch(c) {
+            case 'T':
+                target = optarg;
+            break;
+            case 'E':
+                entryPoint = optarg;
+            break;
+            case 'F':
+                switch(optarg[0])
+                {
+                    case 'o':
+                        if (objectFile != -1)
+                            print_error("'-Fo' option used more than once");
+                        objectFile = open(optarg[1] ? &optarg[1] : argv[optind++],
+                                          O_WRONLY | O_CREAT | O_TRUNC,
+                                          S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+                    break;
+                    case 'h':
+                        if (headerFile != -1)
+                            print_error("'-Fh' option used more than once");
+                        headerFile = open(optarg[1] ? &optarg[1] : argv[optind++],
+                                          O_WRONLY | O_CREAT | O_TRUNC,
+                                          S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+                    break;
+                }
+            break;
+            case 'L':
+            if (optarg[0] == 'D')
+            {
+                long int version = strtol(optarg[1] ? &optarg[1] : argv[optind++], NULL, 10);
+                if (33 <= version && version <= 43)
+                    snprintf(image.name, sizeof(image.name), "engine/D3DCompiler_%ld.dll", version);
+                else
+                    print_error("Compiler version '%ld' is unsupported", version);
+            }
+            break;
+            case '?':
+                print_usage();
+            break;
+            default:
+                print_error("'-%c' is not implemented yet", c);
+            break;
+        }
+    }
 
-    // Load the mpengine module.
+    if (optind > argc - 1)
+        print_error("No files specified");
+    else if (optind < argc - 1)
+        print_error("Too many files specified ('%s' was the last one)", argv[argc - 1]);
+    else
+        inputFile = open(argv[optind], O_RDONLY);
+
+    // Load the D3DCompiler module.
     if (pe_load_library(image.name, &image.image, &image.size) == false) {
         LogMessage("You must add the dll and vdm files to the engine directory");
         return 1;
@@ -148,7 +305,7 @@ int main(int argc, char **argv, char **envp)
     PeHeader    = (PIMAGE_NT_HEADERS)(image.image + DosHeader->e_lfanew);
 
     // Load any additional exports.
-    if (!process_extra_exports(image.image, PeHeader->OptionalHeader.BaseOfCode, "engine/mpengine.map")) {
+    if (!process_extra_exports(image.image, PeHeader->OptionalHeader.BaseOfCode, "engine/D3DCompiler.map")) {
 #ifndef NDEBUG
         LogMessage("The map file wasn't found, symbols wont be available");
 #endif
@@ -163,14 +320,14 @@ int main(int argc, char **argv, char **envp)
                        image.image,
                        PeHeader->OptionalHeader.BaseOfCode,
                        getpid(),
-                       "engine/mpengine.map");
+                       "engine/D3DCompiler.map");
             LogMessage("GDB: add-symbol-file symbols_%d.o 0", getpid());
             __debugbreak();
         }
     }
 
-    if (get_export("__rsignal", &__rsignal) == -1) {
-        errx(EXIT_FAILURE, "Failed to resolve mpengine entrypoint");
+    if (get_export("D3DCompile", &D3DCompile) == -1) {
+        errx(EXIT_FAILURE, "Failed to resolve D3DCompile entrypoint");
     }
 
     EXCEPTION_DISPOSITION ExceptionHandler(struct _EXCEPTION_RECORD *ExceptionRecord,
@@ -190,7 +347,7 @@ int main(int argc, char **argv, char **envp)
     setup_nt_threadinfo(ExceptionHandler);
 
     // Call DllMain()
-    image.entry((PVOID) 'MPEN', DLL_PROCESS_ATTACH, NULL);
+    image.entry("FXC", DLL_PROCESS_ATTACH, NULL);
 
     // Install usage limits to prevent system crash.
     setrlimit(RLIMIT_CORE, &kUsageLimits[RLIMIT_CORE]);
@@ -206,64 +363,70 @@ int main(int argc, char **argv, char **envp)
     mcheck_pedantic(NULL);
 # endif
 
-    ZeroMemory(&BootParams, sizeof BootParams);
-    ZeroMemory(&EngineInfo, sizeof EngineInfo);
-    ZeroMemory(&EngineConfig, sizeof EngineConfig);
+    if (inputFile == -1) {
+        fprintf(stderr, "failed to open file: %s\n", argv[optind]);
+    } else {
+        const SIZE_T blockSize = getpagesize() * 16;
+        SIZE_T srcSize = 0;
+        PBYTE srcData = NULL;
 
-    BootParams.ClientVersion = BOOTENGINE_PARAMS_VERSION;
-    BootParams.Attributes    = BOOT_ATTR_NORMAL;
-    BootParams.SignatureLocation = L"engine";
-    BootParams.ProductName = L"Legitimate Antivirus";
-    EngineConfig.QuarantineLocation = L"quarantine";
-    EngineConfig.Inclusions = L"*.*";
-    EngineConfig.EngineFlags = 1 << 1;
-    BootParams.EngineInfo = &EngineInfo;
-    BootParams.EngineConfig = &EngineConfig;
-    KernelHandle = NULL;
+        // Read data until the stream is empty
+        srcData = malloc(blockSize);
+        for (SIZE_T bytes = 0; (bytes = read(inputFile, srcData + srcSize, blockSize)) != 0; srcSize += bytes) {
+            // If the entire buffer was filled we resize it so we can read the rest
+            if (bytes == blockSize)
+                srcData = realloc(srcData, srcSize + blockSize);
+        }
+        close(inputFile);
 
-    if (__rsignal(&KernelHandle, RSIG_BOOTENGINE, &BootParams, sizeof BootParams) != 0) {
-        LogMessage("__rsignal(RSIG_BOOTENGINE) returned failure, missing definitions?");
-        LogMessage("Make sure the VDM files and mpengine.dll are in the engine directory");
-        return 1;
+        hr = D3DCompile(
+            srcData,
+            srcSize,
+            argv[optind],
+            NULL,
+            D3D_COMPILE_STANDARD_FILE_INCLUDE,
+            entryPoint,
+            target,
+            0,
+            0,
+            &pCode,
+            &pError
+        );
     }
 
-    ZeroMemory(&ScanParams, sizeof ScanParams);
-    ZeroMemory(&ScanDescriptor, sizeof ScanDescriptor);
-    ZeroMemory(&ScanReply, sizeof ScanReply);
-
-    ScanParams.Descriptor        = &ScanDescriptor;
-    ScanParams.ScanReply         = &ScanReply;
-    ScanReply.EngineScanCallback = EngineScanCallback;
-    ScanReply.field_C            = 0x7fffffff;
-    ScanDescriptor.Read          = ReadStream;
-    ScanDescriptor.GetSize       = GetStreamSize;
-    ScanDescriptor.GetName       = GetStreamName;
-
-    if (argc < 2) {
-        LogMessage("usage: %s [filenames...]", *argv);
-        return 1;
+    if (pError) {
+        fprintf(stderr, "%s\n", (LPCSTR)ID3D10Blob_GetBufferPointer(pError));
+        ID3D10Blob_Release(pError);
     }
 
-    // Enable Instrumentation.
-    InstrumentationCallback(image.image, image.size);
+    if (hr != 0) {
+        fprintf(stderr, "compilation failed; no code produced\n");
+        return 1;
+    } else if (pCode) {
+        PBYTE out = (PBYTE)ID3D10Blob_GetBufferPointer(pCode);
+        SIZE_T len = ID3D10Blob_GetBufferSize(pCode);
 
-    for (char *filename = *++argv; *argv; ++argv) {
-        ScanDescriptor.UserPtr = fopen(*argv, "r");
-
-        if (ScanDescriptor.UserPtr == NULL) {
-            LogMessage("failed to open file %s", *argv);
-            return 1;
+        if (headerFile != -1) {
+            dprintf(headerFile, "const unsigned char g_%s[] =\n{\n    ", entryPoint);
+            for (SIZE_T i = 0; i < len; i++) {
+                dprintf(headerFile, "%3u", out[i]);
+                if (i < len - 1)
+                    dprintf(headerFile, ", ");
+                if (i % 6 == 5)
+                    dprintf(headerFile, "\n    ");
+            }
+            dprintf(headerFile, "\n};\n");
+            close(headerFile);
+            printf("compilation header save succeeded\n");
         }
 
-        LogMessage("Scanning %s...", *argv);
-
-        if (__rsignal(&KernelHandle, RSIG_SCAN_STREAMBUFFER, &ScanParams, sizeof ScanParams) != 0) {
-            LogMessage("__rsignal(RSIG_SCAN_STREAMBUFFER) returned failure, file unreadable?");
-            return 1;
+        if (objectFile != -1) {
+            write(objectFile, out, len);
+            close(objectFile);
+            printf("compilation object save succeeded\n");
         }
 
-        fclose(ScanDescriptor.UserPtr);
+        ID3D10Blob_Release(pCode);
     }
-
     return 0;
 }
