@@ -55,6 +55,9 @@ const struct rlimit kUsageLimits[] = {
     [RLIMIT_NOFILE] = { .rlim_cur = 32,         .rlim_max = 32 },
 };
 
+// The official utility has a maximum number of macros allowed
+#define FXC_MAX_MACROS 256
+
 typedef struct _D3D_SHADER_MACRO
 {
     LPCSTR Name;
@@ -193,7 +196,7 @@ void print_usage()
 //  printf("   -getprivate <file>  save private data from shader blob\n");
 //  printf("   -force_rootsig_ver <profile>  force root signature version (rootsig_1_1 if omitted)\n");
 //  printf("\n");
-//  printf("   -D <id>=<text>      define macro\n");
+    printf("   -D <id>=<text>      define macro\n");
     printf("   -LD <version>       Load specified D3DCompiler version\n");
 //  printf("   -nologo             suppress copyright message\n");
     printf("\n");
@@ -224,11 +227,12 @@ int main(int argc, char **argv)
 {
     PIMAGE_DOS_HEADER DosHeader;
     PIMAGE_NT_HEADERS PeHeader;
-    int c, optionIndex;
+    int c = 0, optionIndex = 0, defineIndex = 0;
     int inputFile = -1, objectFile = -1, headerFile = -1;
     LPCSTR target = NULL, entryPoint = NULL;
     ID3DBlob *pCode = NULL, *pError = NULL;
     HRESULT hr = 1;
+    D3D_SHADER_MACRO defines[FXC_MAX_MACROS + 1] = { { NULL, NULL } };
     struct pe_image image = {
         .entry  = NULL,
         .name   = "engine/D3DCompiler_43.dll",
@@ -273,6 +277,19 @@ int main(int argc, char **argv)
                     snprintf(image.name, sizeof(image.name), "engine/D3DCompiler_%ld.dll", version);
                 else
                     print_error("Compiler version '%ld' is unsupported", version);
+            }
+            break;
+            case 'D':
+            if (defineIndex < FXC_MAX_MACROS)
+            {
+                char* sep = strchr(optarg, '=');
+                if (sep) *sep = '\0';
+                defines[defineIndex].Name = optarg;
+                defines[defineIndex].Definition = sep ? sep + 1 : "1";
+            }
+            else
+            {
+                print_error("Too many macros defined (%d)", defineIndex);
             }
             break;
             case '?':
@@ -385,7 +402,7 @@ int main(int argc, char **argv)
             srcData,
             srcSize,
             argv[optind],
-            NULL,
+            defines,
             D3D_COMPILE_STANDARD_FILE_INCLUDE,
             entryPoint,
             target,
