@@ -530,6 +530,7 @@ DECLARE_CRT_EXPORT("modf", modf);
 DECLARE_CRT_EXPORT("_isnan", _isnan);
 DECLARE_CRT_EXPORT("ceil", ceil);
 DECLARE_CRT_EXPORT("qsort", qsort);
+DECLARE_CRT_EXPORT("sscanf", sscanf);
 DECLARE_CRT_EXPORT("_purecall", _purecall);
 DECLARE_CRT_EXPORT("_amsg_exit", _amsg_exit);
 DECLARE_CRT_EXPORT("?terminate@@YAXXZ", abort);

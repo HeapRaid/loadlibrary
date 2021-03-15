@@ -327,7 +327,9 @@ int main(int argc, char **argv)
     }
 
     if (get_export("D3DCompile", &D3DCompile) == -1) {
-        errx(EXIT_FAILURE, "Failed to resolve D3DCompile entrypoint");
+        if (get_export("D3DCompileFromMemory", &D3DCompile) == -1) {
+            errx(EXIT_FAILURE, "Failed to resolve D3DCompile entrypoint");
+        }
     }
 
     EXCEPTION_DISPOSITION ExceptionHandler(struct _EXCEPTION_RECORD *ExceptionRecord,
