@@ -202,7 +202,7 @@ void print_usage()
 //  printf("   -Ni                 output instruction numbers in assembly listings\n");
 //  printf("   -No                 output instruction byte offset in assembly listings\n");
 //  printf("   -Lx                 output hexadecimal literals\n");
-//  printf("\n");
+    printf("\n");
 //  printf("   -P <file>           preprocess to file (must be used alone)\n");
 //  printf("\n");
 //  printf("   @<file>             options response file\n");
@@ -226,7 +226,7 @@ void print_usage()
     printf("   -res_may_alias      assume that UAVs/SRVs may alias for cs_5_0+\n");
     printf("   -enable_unbounded_descriptor_tables  enables unbounded descriptor tables\n");
     printf("   -all_resources_bound  enable aggressive flattening in SM5.1+\n");
-//  printf("\n");
+    printf("\n");
 //  printf("   -setprivate <file>  private data to add to compiled shader blob\n");
 //  printf("   -getprivate <file>  save private data from shader blob\n");
 //  printf("   -force_rootsig_ver <profile>  force root signature version (rootsig_1_1 if omitted)\n");
@@ -273,7 +273,7 @@ int main(int argc, char **argv)
 {
     PIMAGE_DOS_HEADER DosHeader;
     PIMAGE_NT_HEADERS PeHeader;
-    int c = 0, optionIndex = 0, defineIndex = 0;
+    int c = 0, optionIndex = 0, defineIndex = 0, flagsBit1 = 0, flagsBit2 = 0;
     int inputFile = -1, objectFile = -1, headerFile = -1;
     
     HRESULT hr = 1;
@@ -286,17 +286,36 @@ int main(int argc, char **argv)
         .entry  = NULL,
         .name   = "engine/D3DCompiler_43.dll",
     };
-    int bitFlags1[32] = { 0 };
-    int bitFlags2[32] = { 0 };
     struct option longOptions[] = {
         {"help", no_argument, NULL, '?'},
-        {"res_may_alias", no_argument, &bitFlags1[0], D3DCOMPILE_RESOURCES_MAY_ALIAS},
-        {"enable_unbounded_descriptor_tables", no_argument, &bitFlags1[1], D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES},
-        {"all_resources_bound", no_argument, &bitFlags1[2], D3DCOMPILE_ALL_RESOURCES_BOUND},
+
+        {"Od", no_argument, &flagsBit1, D3DCOMPILE_SKIP_OPTIMIZATION},
+        {"Op", no_argument, &flagsBit1, D3DCOMPILE_NO_PRESHADER},
+        {"WX", no_argument, &flagsBit1, D3DCOMPILE_WARNINGS_ARE_ERRORS},
+        {"Vd", no_argument, &flagsBit1, D3DCOMPILE_SKIP_VALIDATION},
+
+        {"Zi", no_argument, &flagsBit1, D3DCOMPILE_DEBUG},
+        {"Zss", no_argument, &flagsBit1, D3DCOMPILE_DEBUG_NAME_FOR_SOURCE},
+        {"Zsb", no_argument, &flagsBit1, D3DCOMPILE_DEBUG_NAME_FOR_BINARY},
+        {"Zpr", no_argument, &flagsBit1, D3DCOMPILE_PACK_MATRIX_ROW_MAJOR},
+        {"Zpc", no_argument, &flagsBit1, D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR},
+
+        {"Gpp", no_argument, &flagsBit1, D3DCOMPILE_PARTIAL_PRECISION},
+        {"Gfa", no_argument, &flagsBit1, D3DCOMPILE_AVOID_FLOW_CONTROL},
+        {"Gfp", no_argument, &flagsBit1, D3DCOMPILE_PREFER_FLOW_CONTROL},
+        {"Gdp", no_argument, &flagsBit2, D3DCOMPILE_EFFECT_ALLOW_SLOW_OPS},
+        {"Ges", no_argument, &flagsBit1, D3DCOMPILE_ENABLE_STRICTNESS},
+        {"Gec", no_argument, &flagsBit1, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY},
+        {"Gis", no_argument, &flagsBit1, D3DCOMPILE_IEEE_STRICTNESS},
+        {"Gch", no_argument, &flagsBit2, D3DCOMPILE_EFFECT_CHILD_EFFECT},
+
+        {"res_may_alias", no_argument, &flagsBit1, D3DCOMPILE_RESOURCES_MAY_ALIAS},
+        {"enable_unbounded_descriptor_tables", no_argument, &flagsBit1, D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES},
+        {"all_resources_bound", no_argument, &flagsBit1, D3DCOMPILE_ALL_RESOURCES_BOUND},
         {0, 0, 0, 0}
     };
     
-    while ((c = getopt_long_only(argc, argv, "T:E:I:V:O:W:Z:G:F:C:N:L:P:Q:D:?", longOptions, &optionIndex)) != -1) {
+    while ((c = getopt_long_only(argc, argv, "T:E:I:O:F:C:N:L:P:Q:D:?", longOptions, &optionIndex)) != -1) {
         switch (c) {
             case 'T':
                 target = optarg;
@@ -304,74 +323,14 @@ int main(int argc, char **argv)
             case 'E':
                 entryPoint = optarg;
             break;
-            case 'V':
-                switch (optarg[0]) {
-                    case 'd': flags1 |= D3DCOMPILE_SKIP_VALIDATION; break;
-                }
-            break;
             case 'O':
                 if (flags1 & D3DCOMPILE_OPTIMIZATION_LEVEL2)
                     print_error("Optimization level (-O#) set multiple times");
                 switch (optarg[0]) {
-                    case 'd': flags1 |= D3DCOMPILE_SKIP_OPTIMIZATION; break;
-                    case 'p': flags1 |= D3DCOMPILE_NO_PRESHADER; break;
                     case '0': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL0; break;
                     case '1': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL1; break;
                     case '2': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL2; break;
                     case '3': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL3; break;
-                }
-            break;
-            case 'W':
-                if (optarg[0] == 'X')
-                    flags1 |= D3DCOMPILE_WARNINGS_ARE_ERRORS;
-            break;
-            case 'Z':
-                switch (optarg[0]) {
-                    case 'i': flags1 |= D3DCOMPILE_DEBUG; break;
-                    case 's':
-                        switch (optarg[1]) {
-                            case 's' : flags1 |= D3DCOMPILE_DEBUG_NAME_FOR_SOURCE; break;
-                            case 'b' : flags1 |= D3DCOMPILE_DEBUG_NAME_FOR_BINARY; break;
-                        }
-                    break;
-                    case 'p':
-                        switch (optarg[1]) {
-                            case 'r' : flags1 |= D3DCOMPILE_PACK_MATRIX_ROW_MAJOR; break;
-                            case 'c' : flags1 |= D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR; break;
-                        }
-                    break;
-                }
-                if (flags1 & D3DCOMPILE_PACK_MATRIX_ROW_MAJOR && flags1 & D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR)
-                    print_error("Cannot specify -Zpr and -Zpc together");
-            break;
-            case 'G':
-                switch (optarg[0]) {
-                    case 'p': if (optarg[1] == 'p') flags1 |= D3DCOMPILE_PARTIAL_PRECISION; break;
-                    case 'f':
-                        switch (optarg[1]) {
-                            case 'a' : flags1 |= D3DCOMPILE_AVOID_FLOW_CONTROL; break;
-                            case 'p' : flags1 |= D3DCOMPILE_PREFER_FLOW_CONTROL; break;
-                        }
-                    break;
-                    case 'd': if (optarg[1] == 'p') flags2 |= D3DCOMPILE_EFFECT_ALLOW_SLOW_OPS; break;
-                    case 'e':
-                        switch (optarg[1]) {
-                            case 's' : flags1 |= D3DCOMPILE_ENABLE_STRICTNESS; break;
-                            case 'c' : flags1 |= D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY; break;
-                        }
-                    break;
-                    case 'i': if (optarg[1] == 's') flags1 |= D3DCOMPILE_IEEE_STRICTNESS; break;
-                    case 'c': if (optarg[1] == 'h') flags2 |= D3DCOMPILE_EFFECT_CHILD_EFFECT; break;
-                }
-                if (flags1 & D3DCOMPILE_AVOID_FLOW_CONTROL && flags1 & D3DCOMPILE_PREFER_FLOW_CONTROL)
-                    print_error("Cannot specify -Gfa and -Gfp together");
-                if (flags1 & D3DCOMPILE_ENABLE_STRICTNESS && flags1 & D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY) {
-                    print_error_msg(
-                        "Strictness and compatibility mode are mutually exclusive:\n"
-                        "For DX9 compatibility mode, use -Gec\n"
-                        "For regular DX10 shaders and effects, use regular mode (do not specify -Gecor -Ges)\n"
-                        "For clean future-proof DX10 shaders and effects, use strict mode (-Ges)"
-                    );
                 }
             break;
             case 'F':
@@ -414,16 +373,29 @@ int main(int argc, char **argv)
             case '?':
                 print_usage();
             break;
+            case '\0':
+                // Apply the long option flag bits and reset them
+                flags1 |= flagsBit1;
+                flags2 |= flagsBit2;
+                flagsBit1 = flagsBit2 = 0;
+            break;
             default:
                 print_error("'-%c' is not implemented yet", c);
             break;
         }
     }
-    
-    // Combine the long option flags
-    for (SIZE_T i = 0; i < 32; i++) {
-        flags1 |= bitFlags1[i];
-        flags2 |= bitFlags2[i];
+
+    if (flags1 & D3DCOMPILE_PACK_MATRIX_ROW_MAJOR && flags1 & D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR)
+        print_error("Cannot specify -Zpr and -Zpc together");
+    if (flags1 & D3DCOMPILE_AVOID_FLOW_CONTROL && flags1 & D3DCOMPILE_PREFER_FLOW_CONTROL)
+        print_error("Cannot specify -Gfa and -Gfp together");
+    if (flags1 & D3DCOMPILE_ENABLE_STRICTNESS && flags1 & D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY) {
+        print_error_msg(
+            "Strictness and compatibility mode are mutually exclusive:\n"
+            "For DX9 compatibility mode, use -Gec\n"
+            "For regular DX10 shaders and effects, use regular mode (do not specify -Gecor -Ges)\n"
+            "For clean future-proof DX10 shaders and effects, use strict mode (-Ges)"
+        );
     }
 
     if (optind > argc - 1)
