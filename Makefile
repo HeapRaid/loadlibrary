@@ -8,7 +8,6 @@ LDLIBS  = intercept/libdisasm.a -Wl,--whole-archive,peloader/libpeloader.a,--no-
 TARGETS=fxc | peloader
 
 all: $(TARGETS)
-	-mkdir -p faketemp
 
 intercept:
 	make -C intercept all
@@ -22,7 +21,6 @@ fxc: fxc.o intercept/hook.o | peloader
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS) $(LDFLAGS)
 
 clean:
-	rm -f a.out core *.o core.* vgcore.* gmon.out mpclient
+	rm -f a.out core *.o core.* vgcore.* gmon.out fxc
 	make -C intercept clean
 	make -C peloader clean
-	rm -rf faketemp
