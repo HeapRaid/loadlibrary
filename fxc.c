@@ -12,39 +12,24 @@
 // GNU General Public License for more details.
 //
 
-#ifndef _GNU_SOURCE
-# define _GNU_SOURCE
-#endif
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <ctype.h>
 #include <stdarg.h>
 #include <assert.h>
 #include <string.h>
-#include <time.h>
 #include <sys/resource.h>
-#include <sys/unistd.h>
-#include <asm/unistd.h>
-#include <sys/types.h>
-#include <sys/time.h>
 #include <sys/stat.h>
-#include <sys/mman.h>
 #include <signal.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <mcheck.h>
-#include <err.h>
 #include <getopt.h>
 
 #include "winnt_types.h"
 #include "pe_linker.h"
 #include "ntoskernel.h"
-#include "util.h"
-#include "hook.h"
 #include "log.h"
 
 // Any usage limits to prevent bugs disrupting system.
@@ -213,7 +198,7 @@ void print_usage()
     printf("      vs_1_1 vs_2_0 vs_2_a vs_2_sw vs_3_0 vs_3_sw vs_4_0 vs_4_0_level_9_1\n");
     printf("      vs_4_0_level_9_3 vs_4_0_level_9_0 vs_4_1 vs_5_0\n");
     printf("\n");
-    exit(0);
+    exit(EXIT_SUCCESS);
 }
 
 void print_error(const char* format, ...)
@@ -224,7 +209,7 @@ void print_error(const char* format, ...)
         vfprintf(stderr, format, ap);
     va_end(ap);
     fprintf(stderr, "%s\033[0m\n", ", use -? to get usage information");
-    exit(1);
+    exit(EXIT_FAILURE);
 }
 
 void print_error_msg(const char* format, ...)
@@ -235,13 +220,11 @@ void print_error_msg(const char* format, ...)
         vfprintf(stderr, format, ap);
     va_end(ap);
     fprintf(stderr, "\033[0m\n");
-    exit(1);
+    exit(EXIT_FAILURE);
 }
 
 int main(int argc, char **argv)
 {
-    PIMAGE_DOS_HEADER DosHeader;
-    PIMAGE_NT_HEADERS PeHeader;
     int c = 0, optionIndex = 0, defineIndex = 0, flagsBit1 = 0, flagsBit2 = 0;
     int inputFile = -1, objectFile = -1, headerFile = -1;
     
@@ -377,35 +360,9 @@ int main(int argc, char **argv)
     // Handle relocations, imports, etc.
     link_pe_images(&image, 1);
 
-    // Fetch the headers to get base offsets.
-    DosHeader   = (PIMAGE_DOS_HEADER) image.image;
-    PeHeader    = (PIMAGE_NT_HEADERS)(image.image + DosHeader->e_lfanew);
-
-    // Load any additional exports.
-    if (!process_extra_exports(image.image, PeHeader->OptionalHeader.BaseOfCode, "engine/D3DCompiler.map")) {
-#ifndef NDEBUG
-        LogMessage("The map file wasn't found, symbols wont be available");
-#endif
-    } else {
-        // Calculate the commands needed to get export and map symbols visible in gdb.
-        if (IsGdbPresent()) {
-            LogMessage("GDB: add-symbol-file %s %#x+%#x",
-                       image.name,
-                       image.image,
-                       PeHeader->OptionalHeader.BaseOfCode);
-            LogMessage("GDB: shell bash genmapsym.sh %#x+%#x symbols_%d.o < %s",
-                       image.image,
-                       PeHeader->OptionalHeader.BaseOfCode,
-                       getpid(),
-                       "engine/D3DCompiler.map");
-            LogMessage("GDB: add-symbol-file symbols_%d.o 0", getpid());
-            __debugbreak();
-        }
-    }
-
     if (get_export("D3DCompile", &D3DCompile) == -1) {
         if (get_export("D3DCompileFromMemory", &D3DCompile) == -1) {
-            errx(EXIT_FAILURE, "Failed to resolve D3DCompile entrypoint");
+            print_error("Failed to resolve D3DCompile entrypoint");
         }
     }
 
@@ -420,7 +377,7 @@ int main(int argc, char **argv)
 
     VOID ResourceExhaustedHandler(int Signal)
     {
-        errx(EXIT_FAILURE, "Resource Limits Exhausted, Signal %s", strsignal(Signal));
+        print_error("Resource Limits Exhausted, Signal %s", strsignal(Signal));
     }
 
     setup_nt_threadinfo(ExceptionHandler);
@@ -436,11 +393,6 @@ int main(int argc, char **argv)
 
     signal(SIGXCPU, ResourceExhaustedHandler);
     signal(SIGXFSZ, ResourceExhaustedHandler);
-
-# ifndef NDEBUG
-    // Enable Maximum heap checking.
-    mcheck_pedantic(NULL);
-# endif
 
     if (inputFile == -1) {
         fprintf(stderr, "failed to open file: %s\n", argv[optind]);
