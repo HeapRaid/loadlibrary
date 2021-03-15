@@ -130,11 +130,6 @@ typedef struct ID3D10Include ID3DInclude;
 #define D3DCOMPILE_RESERVED16                           (1 << 16)
 #define D3DCOMPILE_RESERVED17                           (1 << 17)
 #define D3DCOMPILE_WARNINGS_ARE_ERRORS                  (1 << 18)
-#define D3DCOMPILE_RESOURCES_MAY_ALIAS                  (1 << 19)
-#define D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES   (1 << 20)
-#define D3DCOMPILE_ALL_RESOURCES_BOUND                  (1 << 21)
-#define D3DCOMPILE_DEBUG_NAME_FOR_SOURCE                (1 << 22)
-#define D3DCOMPILE_DEBUG_NAME_FOR_BINARY                (1 << 23)
 
 #define D3DCOMPILE_EFFECT_CHILD_EFFECT              (1 << 0)
 #define D3DCOMPILE_EFFECT_ALLOW_SLOW_OPS            (1 << 1)
@@ -176,8 +171,6 @@ void print_usage()
     printf("   -WX                 treat warnings as errors\n");
     printf("   -Vd                 disable validation\n");
     printf("   -Zi                 enable debugging information\n");
-    printf("   -Zss                debug name with source information\n");
-    printf("   -Zsb                debug name with only binary information\n");
     printf("   -Zpr                pack matrices in row-major order\n");
     printf("   -Zpc                pack matrices in column-major order\n");
     printf("\n");
@@ -191,17 +184,13 @@ void print_usage()
     printf("   -Gch                compile as a child effect for FX 4.x targets\n");
     printf("\n");
     printf("   -Fo <file>          output object file\n");
-//  printf("   -Fl <file>          output a library\n");
 //  printf("   -Fc <file>          output assembly code listing file\n");
 //  printf("   -Fx <file>          output assembly code and hex listing file\n");
     printf("   -Fh <file>          output header file containing object code\n");
 //  printf("   -Fe <file>          output warnings and errors to a specific file\n");
-//  printf("   -Fd <file>          extract shader PDB and write to given file\n");
 //  printf("   -Vn <name>          use <name> as variable name in header file\n");
 //  printf("   -Cc                 output color coded assembly listings\n");
 //  printf("   -Ni                 output instruction numbers in assembly listings\n");
-//  printf("   -No                 output instruction byte offset in assembly listings\n");
-//  printf("   -Lx                 output hexadecimal literals\n");
     printf("\n");
 //  printf("   -P <file>           preprocess to file (must be used alone)\n");
 //  printf("\n");
@@ -209,40 +198,20 @@ void print_usage()
 //  printf("   -dumpbin            load a binary file rather than compiling\n");
 //  printf("   -Qstrip_reflect     strip reflection data from 4_0+ shader bytecode\n");
 //  printf("   -Qstrip_debug       strip debug information from 4_0+ shader bytecode\n");
-//  printf("   -Qstrip_priv        strip private data from 4_0+ shader bytecode\n");
-//  printf("   -Qstrip_rootsignature         strip root signature from shader bytecode\n");
-//  printf("\n");
-//  printf("   -setrootsignature <file>      attach root signature to shader bytecode\n");
-//  printf("   -extractrootsignature <file>  extract root signature from shader bytecode\n");
-//  printf("   -verifyrootsignature <file>   verify shader bytecode against root signature\n");
 //  printf("\n");
 //  printf("   -compress           compress DX10 shader bytecode from files\n");
 //  printf("   -decompress         decompress bytecode from first file, output files should\n");
 //  printf("                       be listed in the order they were in during compression\n");
 //  printf("\n");
-//  printf("   -shtemplate <file>  template shader file for merging/matching resources\n");
-//  printf("   -mergeUAVs          merge UAV slots of template shader and current shader\n");
-//  printf("   -matchUAVs          match template shader UAV slots in current shader\n");
-    printf("   -res_may_alias      assume that UAVs/SRVs may alias for cs_5_0+\n");
-    printf("   -enable_unbounded_descriptor_tables  enables unbounded descriptor tables\n");
-    printf("   -all_resources_bound  enable aggressive flattening in SM5.1+\n");
-    printf("\n");
-//  printf("   -setprivate <file>  private data to add to compiled shader blob\n");
-//  printf("   -getprivate <file>  save private data from shader blob\n");
-//  printf("   -force_rootsig_ver <profile>  force root signature version (rootsig_1_1 if omitted)\n");
-//  printf("\n");
     printf("   -D <id>=<text>      define macro\n");
     printf("   -LD <version>       Load specified D3DCompiler version\n");
 //  printf("   -nologo             suppress copyright message\n");
     printf("\n");
-    printf("   <profile>: cs_4_0 cs_4_1 cs_5_0 cs_5_1 ds_5_0 ds_5_1 gs_4_0 gs_4_1 gs_5_0\n");
-    printf("      gs_5_1 hs_5_0 hs_5_1 lib_4_0 lib_4_1 lib_4_0_level_9_1\n");
-    printf("      lib_4_0_level_9_1_vs_only lib_4_0_level_9_1_ps_only lib_4_0_level_9_3\n");
-    printf("      lib_4_0_level_9_3_vs_only lib_4_0_level_9_3_ps_only lib_5_0 ps_2_0\n");
-    printf("      ps_2_a ps_2_b ps_2_sw ps_3_0 ps_3_sw ps_4_0 ps_4_0_level_9_1\n");
-    printf("      ps_4_0_level_9_3 ps_4_0_level_9_0 ps_4_1 ps_5_0 ps_5_1 rootsig_1_0\n");
-    printf("      rootsig_1_1 tx_1_0 vs_1_1 vs_2_0 vs_2_a vs_2_sw vs_3_0 vs_3_sw vs_4_0\n");
-    printf("      vs_4_0_level_9_1 vs_4_0_level_9_3 vs_4_0_level_9_0 vs_4_1 vs_5_0 vs_5_1\n");
+    printf("   <profile>: cs_4_0 cs_4_1 cs_5_0 ds_5_0 fx_2_0 fx_4_0 fx_4_1 fx_5_0 gs_4_0\n");
+    printf("      gs_4_1 gs_5_0 hs_5_0 ps_2_0 ps_2_a ps_2_b ps_2_sw ps_3_0 ps_3_sw ps_4_0\n");
+    printf("      ps_4_0_level_9_1 ps_4_0_level_9_3 ps_4_0_level_9_0 ps_4_1 ps_5_0 tx_1_0\n");
+    printf("      vs_1_1 vs_2_0 vs_2_a vs_2_sw vs_3_0 vs_3_sw vs_4_0 vs_4_0_level_9_1\n");
+    printf("      vs_4_0_level_9_3 vs_4_0_level_9_0 vs_4_1 vs_5_0\n");
     printf("\n");
     exit(0);
 }
@@ -295,8 +264,6 @@ int main(int argc, char **argv)
         {"Vd", no_argument, &flagsBit1, D3DCOMPILE_SKIP_VALIDATION},
 
         {"Zi", no_argument, &flagsBit1, D3DCOMPILE_DEBUG},
-        {"Zss", no_argument, &flagsBit1, D3DCOMPILE_DEBUG_NAME_FOR_SOURCE},
-        {"Zsb", no_argument, &flagsBit1, D3DCOMPILE_DEBUG_NAME_FOR_BINARY},
         {"Zpr", no_argument, &flagsBit1, D3DCOMPILE_PACK_MATRIX_ROW_MAJOR},
         {"Zpc", no_argument, &flagsBit1, D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR},
 
@@ -308,10 +275,6 @@ int main(int argc, char **argv)
         {"Gec", no_argument, &flagsBit1, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY},
         {"Gis", no_argument, &flagsBit1, D3DCOMPILE_IEEE_STRICTNESS},
         {"Gch", no_argument, &flagsBit2, D3DCOMPILE_EFFECT_CHILD_EFFECT},
-
-        {"res_may_alias", no_argument, &flagsBit1, D3DCOMPILE_RESOURCES_MAY_ALIAS},
-        {"enable_unbounded_descriptor_tables", no_argument, &flagsBit1, D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES},
-        {"all_resources_bound", no_argument, &flagsBit1, D3DCOMPILE_ALL_RESOURCES_BOUND},
         {0, 0, 0, 0}
     };
     
