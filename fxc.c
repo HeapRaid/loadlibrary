@@ -109,7 +109,42 @@ typedef struct ID3D10Include ID3DInclude;
 #define ID3D10Blob_GetBufferSize(This)  \
     ( (This)->lpVtbl -> GetBufferSize(This) )
 
+#define D3DCOMPILE_DEBUG                                (1 << 0)
+#define D3DCOMPILE_SKIP_VALIDATION                      (1 << 1)
+#define D3DCOMPILE_SKIP_OPTIMIZATION                    (1 << 2)
+#define D3DCOMPILE_PACK_MATRIX_ROW_MAJOR                (1 << 3)
+#define D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR             (1 << 4)
+#define D3DCOMPILE_PARTIAL_PRECISION                    (1 << 5)
+#define D3DCOMPILE_FORCE_VS_SOFTWARE_NO_OPT             (1 << 6)
+#define D3DCOMPILE_FORCE_PS_SOFTWARE_NO_OPT             (1 << 7)
+#define D3DCOMPILE_NO_PRESHADER                         (1 << 8)
+#define D3DCOMPILE_AVOID_FLOW_CONTROL                   (1 << 9)
+#define D3DCOMPILE_PREFER_FLOW_CONTROL                  (1 << 10)
+#define D3DCOMPILE_ENABLE_STRICTNESS                    (1 << 11)
+#define D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY       (1 << 12)
+#define D3DCOMPILE_IEEE_STRICTNESS                      (1 << 13)
+#define D3DCOMPILE_OPTIMIZATION_LEVEL0                  (1 << 14)
+#define D3DCOMPILE_OPTIMIZATION_LEVEL1                  0
+#define D3DCOMPILE_OPTIMIZATION_LEVEL2                  ((1 << 14) | (1 << 15))
+#define D3DCOMPILE_OPTIMIZATION_LEVEL3                  (1 << 15)
+#define D3DCOMPILE_RESERVED16                           (1 << 16)
+#define D3DCOMPILE_RESERVED17                           (1 << 17)
+#define D3DCOMPILE_WARNINGS_ARE_ERRORS                  (1 << 18)
+#define D3DCOMPILE_RESOURCES_MAY_ALIAS                  (1 << 19)
+#define D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES   (1 << 20)
+#define D3DCOMPILE_ALL_RESOURCES_BOUND                  (1 << 21)
+#define D3DCOMPILE_DEBUG_NAME_FOR_SOURCE                (1 << 22)
+#define D3DCOMPILE_DEBUG_NAME_FOR_BINARY                (1 << 23)
+
+#define D3DCOMPILE_EFFECT_CHILD_EFFECT              (1 << 0)
+#define D3DCOMPILE_EFFECT_ALLOW_SLOW_OPS            (1 << 1)
+
+#define D3DCOMPILE_FLAGS2_FORCE_ROOT_SIGNATURE_LATEST		0
+#define D3DCOMPILE_FLAGS2_FORCE_ROOT_SIGNATURE_1_0			(1 << 4)
+#define D3DCOMPILE_FLAGS2_FORCE_ROOT_SIGNATURE_1_1			(1 << 5)
+
 #define D3D_COMPILE_STANDARD_FILE_INCLUDE ((ID3DInclude*)(uintptr_t)1)
+
 HRESULT (WINAPI* D3DCompile)(
     PVOID                  pSrcData,
     SIZE_T                 SrcDataSize,
@@ -134,32 +169,32 @@ void print_usage()
     printf("   -E <name>           entrypoint name\n");
 //  printf("   -I <include>        additional include path\n");
 //  printf("   -Vi                 display details about the include process\n");
-//  printf("\n");
-//  printf("   -Od                 disable optimizations\n");
-//  printf("   -Op                 disable preshaders\n");
-//  printf("   -O{0,1,2,3}         optimization level 0..3.  1 is default\n");
-//  printf("   -WX                 treat warnings as errors\n");
-//  printf("   -Vd                 disable validation\n");
-//  printf("   -Zi                 enable debugging information\n");
-//  printf("   -Zss                debug name with source information\n");
-//  printf("   -Zsb                debug name with only binary information\n");
-//  printf("   -Zpr                pack matrices in row-major order\n");
-//  printf("   -Zpc                pack matrices in column-major order\n");
-//  printf("\n");
-//  printf("   -Gpp                force partial precision\n");
-//  printf("   -Gfa                avoid flow control constructs\n");
-//  printf("   -Gfp                prefer flow control constructs\n");
-//  printf("   -Gdp                disable effect performance mode\n");
-//  printf("   -Ges                enable strict mode\n");
-//  printf("   -Gec                enable backwards compatibility mode\n");
-//  printf("   -Gis                force IEEE strictness\n");
-//  printf("   -Gch                compile as a child effect for FX 4.x targets\n");
+    printf("\n");
+    printf("   -Od                 disable optimizations\n");
+    printf("   -Op                 disable preshaders\n");
+    printf("   -O{0,1,2,3}         optimization level 0..3.  1 is default\n");
+    printf("   -WX                 treat warnings as errors\n");
+    printf("   -Vd                 disable validation\n");
+    printf("   -Zi                 enable debugging information\n");
+    printf("   -Zss                debug name with source information\n");
+    printf("   -Zsb                debug name with only binary information\n");
+    printf("   -Zpr                pack matrices in row-major order\n");
+    printf("   -Zpc                pack matrices in column-major order\n");
+    printf("\n");
+    printf("   -Gpp                force partial precision\n");
+    printf("   -Gfa                avoid flow control constructs\n");
+    printf("   -Gfp                prefer flow control constructs\n");
+    printf("   -Gdp                disable effect performance mode\n");
+    printf("   -Ges                enable strict mode\n");
+    printf("   -Gec                enable backwards compatibility mode\n");
+    printf("   -Gis                force IEEE strictness\n");
+    printf("   -Gch                compile as a child effect for FX 4.x targets\n");
     printf("\n");
     printf("   -Fo <file>          output object file\n");
 //  printf("   -Fl <file>          output a library\n");
 //  printf("   -Fc <file>          output assembly code listing file\n");
 //  printf("   -Fx <file>          output assembly code and hex listing file\n");
-//  printf("   -Fh <file>          output header file containing object code\n");
+    printf("   -Fh <file>          output header file containing object code\n");
 //  printf("   -Fe <file>          output warnings and errors to a specific file\n");
 //  printf("   -Fd <file>          extract shader PDB and write to given file\n");
 //  printf("   -Vn <name>          use <name> as variable name in header file\n");
@@ -188,9 +223,9 @@ void print_usage()
 //  printf("   -shtemplate <file>  template shader file for merging/matching resources\n");
 //  printf("   -mergeUAVs          merge UAV slots of template shader and current shader\n");
 //  printf("   -matchUAVs          match template shader UAV slots in current shader\n");
-//  printf("   -res_may_alias      assume that UAVs/SRVs may alias for cs_5_0+\n");
-//  printf("   -enable_unbounded_descriptor_tables  enables unbounded descriptor tables\n");
-//  printf("   -all_resources_bound  enable aggressive flattening in SM5.1+\n");
+    printf("   -res_may_alias      assume that UAVs/SRVs may alias for cs_5_0+\n");
+    printf("   -enable_unbounded_descriptor_tables  enables unbounded descriptor tables\n");
+    printf("   -all_resources_bound  enable aggressive flattening in SM5.1+\n");
 //  printf("\n");
 //  printf("   -setprivate <file>  private data to add to compiled shader blob\n");
 //  printf("   -getprivate <file>  save private data from shader blob\n");
@@ -223,36 +258,124 @@ void print_error(const char* format, ...)
     exit(1);
 }
 
+void print_error_msg(const char* format, ...)
+{
+    fprintf(stderr, "\033[0;31m");
+    va_list ap;
+    va_start(ap, format);
+        vfprintf(stderr, format, ap);
+    va_end(ap);
+    fprintf(stderr, "\033[0m\n");
+    exit(1);
+}
+
 int main(int argc, char **argv)
 {
     PIMAGE_DOS_HEADER DosHeader;
     PIMAGE_NT_HEADERS PeHeader;
     int c = 0, optionIndex = 0, defineIndex = 0;
     int inputFile = -1, objectFile = -1, headerFile = -1;
+    
+    HRESULT hr = 1;
+    UINT flags1 = 0, flags2 = 0;
     LPCSTR target = NULL, entryPoint = NULL;
     ID3DBlob *pCode = NULL, *pError = NULL;
-    HRESULT hr = 1;
     D3D_SHADER_MACRO defines[FXC_MAX_MACROS + 1] = { { NULL, NULL } };
+
     struct pe_image image = {
         .entry  = NULL,
         .name   = "engine/D3DCompiler_43.dll",
     };
+    int bitFlags1[32] = { 0 };
+    int bitFlags2[32] = { 0 };
     struct option longOptions[] = {
         {"help", no_argument, NULL, '?'},
+        {"res_may_alias", no_argument, &bitFlags1[0], D3DCOMPILE_RESOURCES_MAY_ALIAS},
+        {"enable_unbounded_descriptor_tables", no_argument, &bitFlags1[1], D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES},
+        {"all_resources_bound", no_argument, &bitFlags1[2], D3DCOMPILE_ALL_RESOURCES_BOUND},
         {0, 0, 0, 0}
     };
     
     while ((c = getopt_long_only(argc, argv, "T:E:I:V:O:W:Z:G:F:C:N:L:P:Q:D:?", longOptions, &optionIndex)) != -1) {
-        switch(c) {
+        switch (c) {
             case 'T':
                 target = optarg;
             break;
             case 'E':
                 entryPoint = optarg;
             break;
+            case 'V':
+                switch (optarg[0]) {
+                    case 'd': flags1 |= D3DCOMPILE_SKIP_VALIDATION; break;
+                }
+            break;
+            case 'O':
+                if (flags1 & D3DCOMPILE_OPTIMIZATION_LEVEL2)
+                    print_error("Optimization level (-O#) set multiple times");
+                switch (optarg[0]) {
+                    case 'd': flags1 |= D3DCOMPILE_SKIP_OPTIMIZATION; break;
+                    case 'p': flags1 |= D3DCOMPILE_NO_PRESHADER; break;
+                    case '0': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL0; break;
+                    case '1': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL1; break;
+                    case '2': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL2; break;
+                    case '3': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL3; break;
+                }
+            break;
+            case 'W':
+                if (optarg[0] == 'X')
+                    flags1 |= D3DCOMPILE_WARNINGS_ARE_ERRORS;
+            break;
+            case 'Z':
+                switch (optarg[0]) {
+                    case 'i': flags1 |= D3DCOMPILE_DEBUG; break;
+                    case 's':
+                        switch (optarg[1]) {
+                            case 's' : flags1 |= D3DCOMPILE_DEBUG_NAME_FOR_SOURCE; break;
+                            case 'b' : flags1 |= D3DCOMPILE_DEBUG_NAME_FOR_BINARY; break;
+                        }
+                    break;
+                    case 'p':
+                        switch (optarg[1]) {
+                            case 'r' : flags1 |= D3DCOMPILE_PACK_MATRIX_ROW_MAJOR; break;
+                            case 'c' : flags1 |= D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR; break;
+                        }
+                    break;
+                }
+                if (flags1 & D3DCOMPILE_PACK_MATRIX_ROW_MAJOR && flags1 & D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR)
+                    print_error("Cannot specify -Zpr and -Zpc together");
+            break;
+            case 'G':
+                switch (optarg[0]) {
+                    case 'p': if (optarg[1] == 'p') flags1 |= D3DCOMPILE_PARTIAL_PRECISION; break;
+                    case 'f':
+                        switch (optarg[1]) {
+                            case 'a' : flags1 |= D3DCOMPILE_AVOID_FLOW_CONTROL; break;
+                            case 'p' : flags1 |= D3DCOMPILE_PREFER_FLOW_CONTROL; break;
+                        }
+                    break;
+                    case 'd': if (optarg[1] == 'p') flags2 |= D3DCOMPILE_EFFECT_ALLOW_SLOW_OPS; break;
+                    case 'e':
+                        switch (optarg[1]) {
+                            case 's' : flags1 |= D3DCOMPILE_ENABLE_STRICTNESS; break;
+                            case 'c' : flags1 |= D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY; break;
+                        }
+                    break;
+                    case 'i': if (optarg[1] == 's') flags1 |= D3DCOMPILE_IEEE_STRICTNESS; break;
+                    case 'c': if (optarg[1] == 'h') flags2 |= D3DCOMPILE_EFFECT_CHILD_EFFECT; break;
+                }
+                if (flags1 & D3DCOMPILE_AVOID_FLOW_CONTROL && flags1 & D3DCOMPILE_PREFER_FLOW_CONTROL)
+                    print_error("Cannot specify -Gfa and -Gfp together");
+                if (flags1 & D3DCOMPILE_ENABLE_STRICTNESS && flags1 & D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY) {
+                    print_error_msg(
+                        "Strictness and compatibility mode are mutually exclusive:\n"
+                        "For DX9 compatibility mode, use -Gec\n"
+                        "For regular DX10 shaders and effects, use regular mode (do not specify -Gecor -Ges)\n"
+                        "For clean future-proof DX10 shaders and effects, use strict mode (-Ges)"
+                    );
+                }
+            break;
             case 'F':
-                switch(optarg[0])
-                {
+                switch (optarg[0]) {
                     case 'o':
                         if (objectFile != -1)
                             print_error("'-Fo' option used more than once");
@@ -270,8 +393,7 @@ int main(int argc, char **argv)
                 }
             break;
             case 'L':
-            if (optarg[0] == 'D')
-            {
+            if (optarg[0] == 'D') {
                 long int version = strtol(optarg[1] ? &optarg[1] : argv[optind++], NULL, 10);
                 if (33 <= version && version <= 43)
                     snprintf(image.name, sizeof(image.name), "engine/D3DCompiler_%ld.dll", version);
@@ -280,15 +402,12 @@ int main(int argc, char **argv)
             }
             break;
             case 'D':
-            if (defineIndex < FXC_MAX_MACROS)
-            {
+            if (defineIndex < FXC_MAX_MACROS) {
                 char* sep = strchr(optarg, '=');
                 if (sep) *sep = '\0';
                 defines[defineIndex].Name = optarg;
                 defines[defineIndex].Definition = sep ? sep + 1 : "1";
-            }
-            else
-            {
+            } else {
                 print_error("Too many macros defined (%d)", defineIndex);
             }
             break;
@@ -299,6 +418,12 @@ int main(int argc, char **argv)
                 print_error("'-%c' is not implemented yet", c);
             break;
         }
+    }
+    
+    // Combine the long option flags
+    for (SIZE_T i = 0; i < 32; i++) {
+        flags1 |= bitFlags1[i];
+        flags2 |= bitFlags2[i];
     }
 
     if (optind > argc - 1)
@@ -406,8 +531,8 @@ int main(int argc, char **argv)
             D3D_COMPILE_STANDARD_FILE_INCLUDE,
             entryPoint,
             target,
-            0,
-            0,
+            flags1,
+            flags2,
             &pCode,
             &pError
         );
