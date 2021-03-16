@@ -139,6 +139,16 @@ HRESULT (WINAPI* D3DCompile)(
     ID3DBlob               **ppErrorMsgs
 );
 
+HRESULT (WINAPI* D3DPreprocess)(
+  PVOID                  pSrcData,
+  SIZE_T                 SrcDataSize,
+  LPCSTR                 pSourceName,
+  const D3D_SHADER_MACRO *pDefines,
+  ID3DInclude            *pInclude,
+  ID3DBlob               **ppCodeText,
+  ID3DBlob               **ppErrorMsgs
+);
+
 void print_usage()
 {
     printf("Usage: fxc <options> <files>\n");
@@ -177,8 +187,8 @@ void print_usage()
 //  printf("   -Cc                 output color coded assembly listings\n");
 //  printf("   -Ni                 output instruction numbers in assembly listings\n");
     printf("\n");
-//  printf("   -P <file>           preprocess to file (must be used alone)\n");
-//  printf("\n");
+    printf("   -P <file>           preprocess to file (must be used alone)\n");
+    printf("\n");
 //  printf("   @<file>             options response file\n");
 //  printf("   -dumpbin            load a binary file rather than compiling\n");
 //  printf("   -Qstrip_reflect     strip reflection data from 4_0+ shader bytecode\n");
@@ -226,11 +236,11 @@ void print_error_msg(const char* format, ...)
 int main(int argc, char **argv)
 {
     int c = 0, optionIndex = 0, defineIndex = 0, flagsBit1 = 0, flagsBit2 = 0;
-    int inputFile = -1, objectFile = -1, headerFile = -1;
+    int inputFile = -1, objectFile = -1, headerFile = -1, processFile = -1;
     
     HRESULT hr = 1;
     UINT flags1 = 0, flags2 = 0;
-    LPCSTR target = NULL, entryPoint = NULL;
+    LPCSTR target = "vs_2_0", entryPoint = NULL;
     ID3DBlob *pCode = NULL, *pError = NULL;
     D3D_SHADER_MACRO defines[FXC_MAX_MACROS + 1] = { { NULL, NULL } };
 
@@ -280,6 +290,8 @@ int main(int argc, char **argv)
                 }
             break;
             case 'F':
+                if (processFile != -1)
+                    print_error("cannot preprocess to file and compile at the same time");
                 switch (optarg[0]) {
                     case 'o':
                         if (objectFile != -1)
@@ -305,6 +317,12 @@ int main(int argc, char **argv)
                 else
                     print_error("Compiler version '%ld' is unsupported", version);
             }
+            break;
+            case 'P':
+                if (processFile != -1)
+                    print_error("'-P' option used more than once");
+                processFile = open(optarg, O_WRONLY | O_CREAT | O_TRUNC,
+                                    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
             break;
             case 'D':
             if (defineIndex < FXC_MAX_MACROS) {
@@ -366,6 +384,12 @@ int main(int argc, char **argv)
         }
     }
 
+    if (get_export("D3DPreprocess", &D3DPreprocess) == -1) {
+        if (get_export("D3DPreprocessFromMemory", &D3DPreprocess) == -1) {
+            print_error("Failed to resolve D3DPreprocess entrypoint");
+        }
+    }
+
     EXCEPTION_DISPOSITION ExceptionHandler(struct _EXCEPTION_RECORD *ExceptionRecord,
             struct _EXCEPTION_FRAME *EstablisherFrame,
             struct _CONTEXT *ContextRecord,
@@ -394,9 +418,7 @@ int main(int argc, char **argv)
     signal(SIGXCPU, ResourceExhaustedHandler);
     signal(SIGXFSZ, ResourceExhaustedHandler);
 
-    if (inputFile == -1) {
-        fprintf(stderr, "failed to open file: %s\n", argv[optind]);
-    } else {
+    if (inputFile != -1) {
         const SIZE_T blockSize = getpagesize() * 16;
         SIZE_T srcSize = 0;
         PBYTE srcData = NULL;
@@ -410,19 +432,33 @@ int main(int argc, char **argv)
         }
         close(inputFile);
 
-        hr = D3DCompile(
-            srcData,
-            srcSize,
-            argv[optind],
-            defines,
-            D3D_COMPILE_STANDARD_FILE_INCLUDE,
-            entryPoint,
-            target,
-            flags1,
-            flags2,
-            &pCode,
-            &pError
-        );
+        if (processFile != -1) {
+            hr = D3DPreprocess(
+                srcData,
+                srcSize,
+                argv[optind],
+                defines,
+                D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                &pCode,
+                &pError
+            );
+        } else {
+            hr = D3DCompile(
+                srcData,
+                srcSize,
+                argv[optind],
+                defines,
+                D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                entryPoint,
+                target,
+                flags1,
+                flags2,
+                &pCode,
+                &pError
+            );
+        }
+    } else {
+        fprintf(stderr, "failed to open file: %s\n", argv[optind]);
     }
 
     if (pError) {
@@ -430,18 +466,18 @@ int main(int argc, char **argv)
         ID3D10Blob_Release(pError);
     }
 
-    if (hr != 0) {
+    if (hr != 0 || !pCode) {
         fprintf(stderr, "compilation failed; no code produced\n");
         return 1;
-    } else if (pCode) {
+    } else {
         PBYTE out = (PBYTE)ID3D10Blob_GetBufferPointer(pCode);
-        SIZE_T len = ID3D10Blob_GetBufferSize(pCode);
+        SIZE_T size = ID3D10Blob_GetBufferSize(pCode);
 
         if (headerFile != -1) {
             dprintf(headerFile, "const unsigned char g_%s[] =\n{\n    ", entryPoint);
-            for (SIZE_T i = 0; i < len; i++) {
+            for (SIZE_T i = 0; i < size; i++) {
                 dprintf(headerFile, "%3u", out[i]);
-                if (i < len - 1)
+                if (i < size - 1)
                     dprintf(headerFile, ", ");
                 if (i % 6 == 5)
                     dprintf(headerFile, "\n    ");
@@ -452,9 +488,16 @@ int main(int argc, char **argv)
         }
 
         if (objectFile != -1) {
-            write(objectFile, out, len);
+            SIZE_T wrote = write(objectFile, out, size);
+            assert(wrote == size);
             close(objectFile);
             printf("compilation object save succeeded\n");
+        }
+
+        if (processFile != -1) {
+            SIZE_T wrote = write(processFile, out, size);
+            assert(wrote == size);
+            close(processFile);
         }
 
         ID3D10Blob_Release(pCode);
