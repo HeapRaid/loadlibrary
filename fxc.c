@@ -31,6 +31,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <dirent.h>
+#include <poll.h>
 
 #include "winnt_types.h"
 #include "pe_linker.h"
@@ -184,7 +185,7 @@ void print_usage()
     printf("\n");
     printf("   -T <profile>        target profile\n");
     printf("   -E <name>           entrypoint name\n");
-    printf("   -I <include>        additional include path\n");
+    printf("   -I <include>        additional include path. use - to read from stdin\n");
 //  printf("   -Vi                 display details about the include process\n");
     printf("\n");
     printf("   -Od                 disable optimizations\n");
@@ -260,27 +261,47 @@ void print_error_msg(const char* format, ...)
     exit(EXIT_FAILURE);
 }
 
-PVOID read_file(INT dir, LPCSTR pFileName, SIZE_T* pSize)
+PVOID read_stream(INT fd, SIZE_T* pSize)
 {
     const SIZE_T blockSize = getpagesize() * 16;
+    SIZE_T size = 0, allocSize = blockSize;
+    PBYTE data = malloc(blockSize);
+    
+    // Wait until the stream is ready
+    struct pollfd ready = { fd, POLLIN, 0 };
+    poll(&ready, 1, -1);
+
+    // Read data until we will block
+    do {
+        SIZE_T bytes = 0;
+
+        // If the entire buffer was filled we resize it so we can read the rest
+        if (size >= allocSize) {
+            allocSize += blockSize;
+            data = realloc(data, allocSize);
+        }
+
+        bytes = read(fd, data + size, allocSize - size);
+        if (bytes <= 0)
+            break;
+        size += bytes;
+    } while (poll(&ready, 1, 0) > 0 && ready.revents & POLLIN);
+    
+    if (pSize)
+        *pSize = size;
+    return data;
+}
+
+PVOID read_file(INT dir, LPCSTR pFileName, SIZE_T* pSize)
+{
     int file = openat(dir, pFileName, O_RDONLY);
-    SIZE_T size = 0;
     PBYTE data = NULL;
     
     if (file == -1)
         return NULL;
-
-    // Read data until the stream is empty
-    data = malloc(blockSize);
-    for (SIZE_T bytes = 0; (bytes = read(file, data + size, blockSize)) != 0; size += bytes) {
-        // If the entire buffer was filled we resize it so we can read the rest
-        if (bytes == blockSize)
-            data = realloc(data, size + blockSize);
-    }
-    close(file);
     
-    if (pSize)
-        *pSize = size;
+    data = read_stream(file, pSize);
+    close(file);
     return data;
 }
 
@@ -311,7 +332,28 @@ HRESULT WINAPI include_close(ID3D10Include* This, PVOID pData)
     return STATUS_SUCCESS;
 }
 
+HRESULT WINAPI pipe_include_open(ID3D10Include* This, D3D_INCLUDE_TYPE IncludeType, LPCSTR pFileName, PVOID pParentData, PVOID *ppData, UINT *pBytes)
+{
+    DebugLog("Type: %d, File: %s, Parent: %p\n", IncludeType, pFileName, pParentData);
+
+    if (!ppData)
+        return STATUS_INVALID_PARAMETER;
+
+    printf(IncludeType == D3D_INCLUDE_LOCAL ? "#include \"%s\"\n" : "#include <%s>\n", pFileName);
+
+    SIZE_T size;
+    *ppData = read_stream(STDIN_FILENO, &size);
+    if (*ppData) {
+        if (pBytes)
+            *pBytes = (UINT)size;
+        return STATUS_SUCCESS;
+    }
+
+    return STATUS_FAILURE;
+}
+
 struct ID3D10IncludeVtbl include_vtbl = { include_open, include_close };
+struct ID3D10IncludeVtbl pipe_include_vtbl = { pipe_include_open, include_close };
 
 int main(int argc, char **argv)
 {
@@ -362,7 +404,9 @@ int main(int argc, char **argv)
                 entryPoint = optarg;
             break;
             case 'I':
-                if (includeIndex > FXC_MAX_INCLUDES || (includer.includeDirs[includeIndex++] = open(optarg, O_DIRECTORY | O_PATH)) == -1)
+                if (optarg[0] == '-' && optarg[1] == '\0')
+                    includer.lpVtbl = &pipe_include_vtbl;
+                else if (includeIndex > FXC_MAX_INCLUDES || (includer.includeDirs[includeIndex++] = open(optarg, O_DIRECTORY | O_PATH)) == -1)
                     print_error_msg("unable to add include path to search list: %s\n", optarg);
             break;
             case 'O':
