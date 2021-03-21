@@ -12,6 +12,10 @@
 // GNU General Public License for more details.
 //
 
+#ifndef _GNU_SOURCE
+# define _GNU_SOURCE
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -26,6 +30,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <dirent.h>
 
 #include "winnt_types.h"
 #include "pe_linker.h"
@@ -43,11 +48,23 @@ const struct rlimit kUsageLimits[] = {
 // The official utility has a maximum number of macros allowed
 #define FXC_MAX_MACROS 256
 
+// The official utility has a maximum number of include paths allowed
+#define FXC_MAX_INCLUDES 100
+
 typedef struct _D3D_SHADER_MACRO
 {
     LPCSTR Name;
     LPCSTR Definition;
 } D3D_SHADER_MACRO;
+
+typedef enum _D3D_INCLUDE_TYPE
+{
+    D3D_INCLUDE_LOCAL       = 0,
+    D3D_INCLUDE_SYSTEM      = ( D3D_INCLUDE_LOCAL + 1 ) ,
+    D3D10_INCLUDE_LOCAL     = D3D_INCLUDE_LOCAL,
+    D3D10_INCLUDE_SYSTEM    = D3D_INCLUDE_SYSTEM,
+    D3D_INCLUDE_FORCE_DWORD = 0x7fffffff
+} D3D_INCLUDE_TYPE;
 
 typedef GUID IID;
 typedef const IID* REFIID;
@@ -75,6 +92,19 @@ struct ID3D10Blob
     const struct ID3D10BlobVtbl *lpVtbl;
 };
 
+typedef struct ID3D10Include ID3D10Include;
+struct ID3D10IncludeVtbl
+{
+    HRESULT (WINAPI *Open)(ID3D10Include * This, D3D_INCLUDE_TYPE IncludeType, LPCSTR pFileName, PVOID pParentData, PVOID *ppData, UINT *pBytes);
+    HRESULT (WINAPI *Close)(ID3D10Include * This, PVOID pData);
+};
+
+struct ID3D10Include
+{
+    const struct ID3D10IncludeVtbl *lpVtbl;
+    int includeDirs[FXC_MAX_INCLUDES + 1];
+};
+
 typedef struct ID3D10Blob ID3DBlob;
 typedef struct ID3D10Include ID3DInclude;
 
@@ -86,7 +116,6 @@ typedef struct ID3D10Include ID3DInclude;
 
 #define ID3D10Blob_Release(This)    \
     ( (This)->lpVtbl -> Release(This) )
-
 
 #define ID3D10Blob_GetBufferPointer(This)   \
     ( (This)->lpVtbl -> GetBufferPointer(This) )
@@ -138,13 +167,13 @@ HRESULT (WINAPI* D3DCompile)(
 );
 
 HRESULT (WINAPI* D3DPreprocess)(
-  PVOID                  pSrcData,
-  SIZE_T                 SrcDataSize,
-  LPCSTR                 pSourceName,
-  const D3D_SHADER_MACRO *pDefines,
-  ID3DInclude            *pInclude,
-  ID3DBlob               **ppCodeText,
-  ID3DBlob               **ppErrorMsgs
+    PVOID                  pSrcData,
+    SIZE_T                 SrcDataSize,
+    LPCSTR                 pSourceName,
+    const D3D_SHADER_MACRO *pDefines,
+    ID3DInclude            *pInclude,
+    ID3DBlob               **ppCodeText,
+    ID3DBlob               **ppErrorMsgs
 );
 
 void print_usage()
@@ -155,7 +184,7 @@ void print_usage()
     printf("\n");
     printf("   -T <profile>        target profile\n");
     printf("   -E <name>           entrypoint name\n");
-//  printf("   -I <include>        additional include path\n");
+    printf("   -I <include>        additional include path\n");
 //  printf("   -Vi                 display details about the include process\n");
     printf("\n");
     printf("   -Od                 disable optimizations\n");
@@ -231,16 +260,71 @@ void print_error_msg(const char* format, ...)
     exit(EXIT_FAILURE);
 }
 
+PVOID read_file(INT dir, LPCSTR pFileName, SIZE_T* pSize)
+{
+    const SIZE_T blockSize = getpagesize() * 16;
+    int file = openat(dir, pFileName, O_RDONLY);
+    SIZE_T size = 0;
+    PBYTE data = NULL;
+    
+    if (file == -1)
+        return NULL;
+
+    // Read data until the stream is empty
+    data = malloc(blockSize);
+    for (SIZE_T bytes = 0; (bytes = read(file, data + size, blockSize)) != 0; size += bytes) {
+        // If the entire buffer was filled we resize it so we can read the rest
+        if (bytes == blockSize)
+            data = realloc(data, size + blockSize);
+    }
+    close(file);
+    
+    if (pSize)
+        *pSize = size;
+    return data;
+}
+
+HRESULT WINAPI include_open(ID3D10Include* This, D3D_INCLUDE_TYPE IncludeType, LPCSTR pFileName, PVOID pParentData, PVOID *ppData, UINT *pBytes)
+{
+    DebugLog("Type: %d, File: %s, Parent: %p\n", IncludeType, pFileName, pParentData);
+
+    if (!ppData)
+        return STATUS_INVALID_PARAMETER;
+
+    // TODO: Change working directory to the directory of the parent include file
+    for (int i = 0; i < FXC_MAX_INCLUDES && This->includeDirs[i] != -1; i++) {
+        SIZE_T size;
+        *ppData = read_file(This->includeDirs[i], pFileName, &size);
+        if (*ppData) {
+            if (pBytes)
+                *pBytes = (UINT)size;
+            return STATUS_SUCCESS;
+        }
+    }
+
+    return STATUS_FAILURE;
+}
+
+HRESULT WINAPI include_close(ID3D10Include* This, PVOID pData)
+{
+    free(pData);
+    return STATUS_SUCCESS;
+}
+
+struct ID3D10IncludeVtbl include_vtbl = { include_open, include_close };
+
 int main(int argc, char **argv)
 {
-    int c = 0, optionIndex = 0, defineIndex = 0, flagsBit1 = 0, flagsBit2 = 0;
-    int inputFile = -1, objectFile = -1, headerFile = -1, processFile = -1;
+    int c = 0, optionIndex = 0, defineIndex = 0, includeIndex = 1;
+    int flagsBit1 = 0, flagsBit2 = 0;
+    int objectFile = -1, headerFile = -1, processFile = -1;
     
     HRESULT hr = 1;
     UINT flags1 = 0, flags2 = 0;
     LPCSTR target = "vs_2_0", entryPoint = NULL;
     ID3DBlob *pCode = NULL, *pError = NULL;
     D3D_SHADER_MACRO defines[FXC_MAX_MACROS + 1] = { { NULL, NULL } };
+    ID3D10Include includer = { &include_vtbl, { AT_FDCWD, -1 } };
 
     struct pe_image image = {
         .entry  = NULL,
@@ -276,6 +360,10 @@ int main(int argc, char **argv)
             break;
             case 'E':
                 entryPoint = optarg;
+            break;
+            case 'I':
+                if (includeIndex > FXC_MAX_INCLUDES || (includer.includeDirs[includeIndex++] = open(optarg, O_DIRECTORY | O_PATH)) == -1)
+                    print_error_msg("unable to add include path to search list: %s\n", optarg);
             break;
             case 'O':
                 if (flags1 & D3DCOMPILE_OPTIMIZATION_LEVEL2)
@@ -360,17 +448,10 @@ int main(int argc, char **argv)
         );
     }
 
-    if (optind > argc - 1)
-        print_error("No files specified");
-    else if (optind < argc - 1)
-        print_error("Too many files specified ('%s' was the last one)", argv[argc - 1]);
-    else
-        inputFile = open(argv[optind], O_RDONLY);
-
     // Load the D3DCompiler module.
     if (pe_load_library(image.name, &image.image, &image.size) == false) {
         LogMessage("You must add the dll and vdm files to the engine directory");
-        return 1;
+        return EXIT_FAILURE;
     }
 
     // Handle relocations, imports, etc.
@@ -416,19 +497,16 @@ int main(int argc, char **argv)
     signal(SIGXCPU, ResourceExhaustedHandler);
     signal(SIGXFSZ, ResourceExhaustedHandler);
 
-    if (inputFile != -1) {
-        const SIZE_T blockSize = getpagesize() * 16;
-        SIZE_T srcSize = 0;
-        PBYTE srcData = NULL;
-
-        // Read data until the stream is empty
-        srcData = malloc(blockSize);
-        for (SIZE_T bytes = 0; (bytes = read(inputFile, srcData + srcSize, blockSize)) != 0; srcSize += bytes) {
-            // If the entire buffer was filled we resize it so we can read the rest
-            if (bytes == blockSize)
-                srcData = realloc(srcData, srcSize + blockSize);
-        }
-        close(inputFile);
+    if (optind > argc - 1)
+        print_error("No files specified");
+    else if (optind < argc - 1)
+        print_error("Too many files specified ('%s' was the last one)", argv[argc - 1]);
+    else {
+        SIZE_T srcSize;
+        PVOID srcData = read_file(AT_FDCWD, argv[optind], &srcSize);
+        
+        if (!srcData)
+            fprintf(stderr, "failed to open file: %s\n", argv[optind]);
 
         if (processFile != -1) {
             hr = D3DPreprocess(
@@ -436,7 +514,7 @@ int main(int argc, char **argv)
                 srcSize,
                 argv[optind],
                 defines,
-                NULL,
+                &includer,
                 &pCode,
                 &pError
             );
@@ -446,7 +524,7 @@ int main(int argc, char **argv)
                 srcSize,
                 argv[optind],
                 defines,
-                NULL,
+                &includer,
                 entryPoint,
                 target,
                 flags1,
@@ -455,8 +533,8 @@ int main(int argc, char **argv)
                 &pError
             );
         }
-    } else {
-        fprintf(stderr, "failed to open file: %s\n", argv[optind]);
+        
+        free(srcData);
     }
 
     if (pError) {
@@ -466,7 +544,7 @@ int main(int argc, char **argv)
 
     if (hr != 0 || !pCode) {
         fprintf(stderr, "compilation failed; no code produced\n");
-        return 1;
+        return EXIT_FAILURE;
     } else {
         PBYTE out = (PBYTE)ID3D10Blob_GetBufferPointer(pCode);
         SIZE_T size = ID3D10Blob_GetBufferSize(pCode);
@@ -500,5 +578,5 @@ int main(int argc, char **argv)
 
         ID3D10Blob_Release(pCode);
     }
-    return 0;
+    return EXIT_SUCCESS;
 }
