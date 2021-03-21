@@ -123,8 +123,6 @@ typedef struct ID3D10Include ID3DInclude;
 #define D3DCOMPILE_FLAGS2_FORCE_ROOT_SIGNATURE_1_0			(1 << 4)
 #define D3DCOMPILE_FLAGS2_FORCE_ROOT_SIGNATURE_1_1			(1 << 5)
 
-#define D3D_COMPILE_STANDARD_FILE_INCLUDE ((ID3DInclude*)(uintptr_t)1)
-
 HRESULT (WINAPI* D3DCompile)(
     PVOID                  pSrcData,
     SIZE_T                 SrcDataSize,
@@ -438,7 +436,7 @@ int main(int argc, char **argv)
                 srcSize,
                 argv[optind],
                 defines,
-                D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                NULL,
                 &pCode,
                 &pError
             );
@@ -448,7 +446,7 @@ int main(int argc, char **argv)
                 srcSize,
                 argv[optind],
                 defines,
-                D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                NULL,
                 entryPoint,
                 target,
                 flags1,
