@@ -55,18 +55,18 @@ typedef const IID* REFIID;
 typedef struct ID3D10Blob ID3D10Blob;
 typedef struct ID3D10BlobVtbl
 {
-    HRESULT (*QueryInterface )(
+    HRESULT (WINAPI *QueryInterface )(
         ID3D10Blob * This,
         /* [in] */ REFIID riid,
         /* [annotation][iid_is][out] */
         void **ppvObject);
-    ULONG (*AddRef )(
+    ULONG (WINAPI *AddRef )(
         ID3D10Blob * This);
-    ULONG (*Release )(
+    ULONG (WINAPI *Release )(
         ID3D10Blob * This);
-    void* (*GetBufferPointer )(
+    void* (WINAPI *GetBufferPointer )(
         ID3D10Blob * This);
-    SIZE_T (*GetBufferSize )(
+    SIZE_T (WINAPI *GetBufferSize )(
         ID3D10Blob * This);
 } ID3D10BlobVtbl;
 
