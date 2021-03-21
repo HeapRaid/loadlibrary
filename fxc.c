@@ -52,6 +52,9 @@ const struct rlimit kUsageLimits[] = {
 // The official utility has a maximum number of include paths allowed
 #define FXC_MAX_INCLUDES 100
 
+// Maximum line width for word wrapping the command line
+#define FXC_COLUMN_WIDTH 80
+
 typedef struct _D3D_SHADER_MACRO
 {
     LPCSTR Name;
@@ -177,6 +180,14 @@ HRESULT (WINAPI* D3DPreprocess)(
     ID3DBlob               **ppErrorMsgs
 );
 
+HRESULT (WINAPI* D3DDisassemble)(
+    PVOID    pSrcData,
+    SIZE_T   SrcDataSize,
+    UINT     Flags,
+    LPCSTR   szComments,
+    ID3DBlob **ppDisassembly
+);
+
 void print_usage()
 {
     printf("Usage: fxc <options> <files>\n");
@@ -259,6 +270,52 @@ void print_error_msg(const char* format, ...)
     va_end(ap);
     fprintf(stderr, "\033[0m\n");
     exit(EXIT_FAILURE);
+}
+
+PCHAR format_cmd_line(int argc, char **argv)
+{
+    static LPCSTR start = "//\n";
+    static LPCSTR prefix = "//   fxc";
+    static LPCSTR lineWrap = "//    ";
+    PCHAR cmdLine, argp;
+    SIZE_T cmdLineSize = strlen(prefix) + 1; // prefix + newline
+    struct {
+        bool wrap;
+        LPCSTR arg;
+    } fragments[argc];
+    fragments[0].wrap = false;
+    fragments[0].arg = prefix;
+
+    // Calculate total size needed for formatted command line
+    for (int i = 1, c = 0; i < argc; i++) {
+        cmdLineSize += strlen(argv[i]) + 1; // argument + separator
+        fragments[i].arg = argv[i];
+        fragments[i].wrap = cmdLineSize - c > FXC_COLUMN_WIDTH;
+        if (fragments[i].wrap) {
+            c = cmdLineSize;
+            cmdLineSize += strlen(lineWrap);
+        }
+    }
+    cmdLineSize += strlen(start) + 1; // start + terminator
+
+    // Allocate the line and format it including line breaks
+    cmdLine = malloc(cmdLineSize);
+    argp = stpcpy(cmdLine, start);
+    for (int i = 0; i < argc; i++) {
+        if (fragments[i].wrap) {
+            *argp++ = '\n';
+            argp = stpcpy(argp, lineWrap);
+        } else if (i > 0) {
+            *argp++ = ' ';
+        }
+        argp = stpcpy(argp, fragments[i].arg);
+    }
+    *argp++ = '\n';
+    *argp++ = '\0';
+
+    // Check we've correctly calculated the size
+    assert(argp - cmdLine == cmdLineSize);
+    return cmdLine;
 }
 
 PVOID read_stream(INT fd, SIZE_T* pSize)
@@ -359,14 +416,16 @@ int main(int argc, char **argv)
 {
     int c = 0, optionIndex = 0, defineIndex = 0, includeIndex = 1;
     int flagsBit1 = 0, flagsBit2 = 0;
-    int objectFile = -1, headerFile = -1, processFile = -1;
+    int objectFile = -1, headerFile = -1, processFile = -1, assemblyFile = -1;
+    bool optLevelSet = false, outputFileSet = false;
     
     HRESULT hr = 1;
+    PCHAR cmdLine = NULL;
     UINT flags1 = 0, flags2 = 0;
     LPCSTR target = "fx_2_0", entryPoint = NULL;
     ID3DBlob *pCode = NULL, *pError = NULL;
     D3D_SHADER_MACRO defines[FXC_MAX_MACROS + 1] = { { NULL, NULL } };
-    ID3D10Include includer = { &include_vtbl, { AT_FDCWD, -1 } };
+    ID3DInclude includer = { &include_vtbl, { AT_FDCWD, -1 } };
 
     struct pe_image image = {
         .entry  = NULL,
@@ -394,7 +453,10 @@ int main(int argc, char **argv)
         {"Gch", no_argument, &flagsBit2, D3DCOMPILE_EFFECT_CHILD_EFFECT},
         {0, 0, 0, 0}
     };
-    
+
+    // Cache the full command-line before we parse it
+    cmdLine = format_cmd_line(argc, argv);
+
     while ((c = getopt_long_only(argc, argv, "T:E:I:O:F:C:N:L:P:Q:D:?", longOptions, &optionIndex)) != -1) {
         switch (c) {
             case 'T':
@@ -410,7 +472,7 @@ int main(int argc, char **argv)
                     print_error_msg("unable to add include path to search list: %s\n", optarg);
             break;
             case 'O':
-                if (flags1 & D3DCOMPILE_OPTIMIZATION_LEVEL2)
+                if (optLevelSet)
                     print_error("Optimization level (-O#) set multiple times");
                 switch (optarg[0]) {
                     case '0': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL0; break;
@@ -418,6 +480,7 @@ int main(int argc, char **argv)
                     case '2': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL2; break;
                     case '3': flags1 |= D3DCOMPILE_OPTIMIZATION_LEVEL3; break;
                 }
+                optLevelSet = true;
             break;
             case 'F':
                 if (processFile != -1)
@@ -438,6 +501,7 @@ int main(int argc, char **argv)
                                           S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
                     break;
                 }
+                outputFileSet = true;
             break;
             case 'L':
             if (optarg[0] == 'D') {
@@ -492,6 +556,9 @@ int main(int argc, char **argv)
         );
     }
 
+    if (!outputFileSet)
+        assemblyFile = STDOUT_FILENO;
+
     // Load the D3DCompiler module.
     if (pe_load_library(image.name, &image.image, &image.size) == false) {
         LogMessage("You must add the dll and vdm files to the engine directory");
@@ -510,6 +577,12 @@ int main(int argc, char **argv)
     if (get_export("D3DPreprocess", &D3DPreprocess) == -1) {
         if (get_export("D3DPreprocessFromMemory", &D3DPreprocess) == -1) {
             print_error("Failed to resolve D3DPreprocess entrypoint");
+        }
+    }
+
+    if (get_export("D3DDisassemble", &D3DDisassemble) == -1) {
+        if (get_export("D3DDisassembleCode", &D3DDisassemble) == -1) {
+            print_error("Failed to resolve D3DDisassemble entrypoint");
         }
     }
 
@@ -620,7 +693,20 @@ int main(int argc, char **argv)
             close(processFile);
         }
 
+        if (assemblyFile != -1) {
+            ID3DBlob *disassm;
+            D3DDisassemble(out, size, 0, cmdLine, &disassm);
+            out = (PBYTE)ID3D10Blob_GetBufferPointer(disassm);
+            size = ID3D10Blob_GetBufferSize(disassm);
+            SIZE_T wrote = write(assemblyFile, out, size);
+            assert(wrote == size);
+            close(assemblyFile);
+            ID3D10Blob_Release(disassm);
+        }
+
         ID3D10Blob_Release(pCode);
     }
+
+    free(cmdLine);
     return EXIT_SUCCESS;
 }
