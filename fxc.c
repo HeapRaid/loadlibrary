@@ -149,12 +149,17 @@ typedef struct ID3D10Include ID3DInclude;
 #define D3DCOMPILE_RESERVED17                           (1 << 17)
 #define D3DCOMPILE_WARNINGS_ARE_ERRORS                  (1 << 18)
 
-#define D3DCOMPILE_EFFECT_CHILD_EFFECT              (1 << 0)
-#define D3DCOMPILE_EFFECT_ALLOW_SLOW_OPS            (1 << 1)
+#define D3DCOMPILE_EFFECT_CHILD_EFFECT                  (1 << 0)
+#define D3DCOMPILE_EFFECT_ALLOW_SLOW_OPS                (1 << 1)
 
-#define D3DCOMPILE_FLAGS2_FORCE_ROOT_SIGNATURE_LATEST		0
-#define D3DCOMPILE_FLAGS2_FORCE_ROOT_SIGNATURE_1_0			(1 << 4)
-#define D3DCOMPILE_FLAGS2_FORCE_ROOT_SIGNATURE_1_1			(1 << 5)
+#define D3D_DISASM_ENABLE_COLOR_CODE                    (1 << 0)
+#define D3D_DISASM_ENABLE_DEFAULT_VALUE_PRINTS          (1 << 1)
+#define D3D_DISASM_ENABLE_INSTRUCTION_NUMBERING         (1 << 2)
+#define D3D_DISASM_ENABLE_INSTRUCTION_CYCLE             (1 << 3)
+#define D3D_DISASM_DISABLE_DEBUG_INFO                   (1 << 4)
+#define D3D_DISASM_ENABLE_INSTRUCTION_OFFSET            (1 << 5)
+#define D3D_DISASM_INSTRUCTION_ONLY                     (1 << 6)
+#define D3D_DISASM_PRINT_HEX_LITERALS                   (1 << 7)
 
 HRESULT (WINAPI* D3DCompile)(
     PVOID                  pSrcData,
@@ -218,13 +223,13 @@ void print_usage()
     printf("   -Gch                compile as a child effect for FX 4.x targets\n");
     printf("\n");
     printf("   -Fo <file>          output object file\n");
-//  printf("   -Fc <file>          output assembly code listing file\n");
+    printf("   -Fc <file>          output assembly code listing file\n");
 //  printf("   -Fx <file>          output assembly code and hex listing file\n");
     printf("   -Fh <file>          output header file containing object code\n");
 //  printf("   -Fe <file>          output warnings and errors to a specific file\n");
 //  printf("   -Vn <name>          use <name> as variable name in header file\n");
-//  printf("   -Cc                 output color coded assembly listings\n");
-//  printf("   -Ni                 output instruction numbers in assembly listings\n");
+    printf("   -Cc                 output color coded assembly listings\n");
+    printf("   -Ni                 output instruction numbers in assembly listings\n");
     printf("\n");
     printf("   -P <file>           preprocess to file (must be used alone)\n");
     printf("\n");
@@ -362,6 +367,18 @@ PVOID read_file(INT dir, LPCSTR pFileName, SIZE_T* pSize)
     return data;
 }
 
+INT create_file(PCHAR pFileName)
+{
+    if (!pFileName)
+        return -1;
+
+    if (pFileName[0] == '-' && pFileName[1] == '\0')
+        return STDOUT_FILENO;
+
+    return open(pFileName, O_WRONLY | O_CREAT | O_TRUNC,
+                S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+}
+
 HRESULT WINAPI include_open(ID3D10Include* This, D3D_INCLUDE_TYPE IncludeType, LPCSTR pFileName, PVOID pParentData, PVOID *ppData, UINT *pBytes)
 {
     DebugLog("Type: %d, File: %s, Parent: %p\n", IncludeType, pFileName, pParentData);
@@ -415,14 +432,14 @@ struct ID3D10IncludeVtbl pipe_include_vtbl = { pipe_include_open, include_close 
 int main(int argc, char **argv)
 {
     int c = 0, optionIndex = 0, defineIndex = 0, includeIndex = 1;
-    int flagsBit1 = 0, flagsBit2 = 0;
+    int flagsBit1 = 0, flagsBit2 = 0, flagsBitAsm = 0;
     int objectFile = -1, headerFile = -1, processFile = -1, assemblyFile = -1;
     bool optLevelSet = false, outputFileSet = false;
     
     HRESULT hr = 1;
     PCHAR cmdLine = NULL;
-    UINT flags1 = 0, flags2 = 0;
-    LPCSTR target = "fx_2_0", entryPoint = NULL;
+    UINT flags1 = 0, flags2 = 0, flagsAsm = 0;
+    LPCSTR target = NULL, entryPoint = NULL;
     ID3DBlob *pCode = NULL, *pError = NULL;
     D3D_SHADER_MACRO defines[FXC_MAX_MACROS + 1] = { { NULL, NULL } };
     ID3DInclude includer = { &include_vtbl, { AT_FDCWD, -1 } };
@@ -451,13 +468,16 @@ int main(int argc, char **argv)
         {"Gec", no_argument, &flagsBit1, D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY},
         {"Gis", no_argument, &flagsBit1, D3DCOMPILE_IEEE_STRICTNESS},
         {"Gch", no_argument, &flagsBit2, D3DCOMPILE_EFFECT_CHILD_EFFECT},
+
+        {"Cc", no_argument, &flagsBitAsm, D3D_DISASM_ENABLE_COLOR_CODE},
+        {"Ni", no_argument, &flagsBitAsm, D3D_DISASM_ENABLE_INSTRUCTION_NUMBERING},
         {0, 0, 0, 0}
     };
 
     // Cache the full command-line before we parse it
     cmdLine = format_cmd_line(argc, argv);
 
-    while ((c = getopt_long_only(argc, argv, "T:E:I:O:F:C:N:L:P:Q:D:?", longOptions, &optionIndex)) != -1) {
+    while ((c = getopt_long_only(argc, argv, "T:E:I:O:F:L:P:Q:D:?", longOptions, &optionIndex)) != -1) {
         switch (c) {
             case 'T':
                 target = optarg;
@@ -483,22 +503,21 @@ int main(int argc, char **argv)
                 optLevelSet = true;
             break;
             case 'F':
-                if (processFile != -1)
-                    print_error("cannot preprocess to file and compile at the same time");
                 switch (optarg[0]) {
                     case 'o':
                         if (objectFile != -1)
                             print_error("'-Fo' option used more than once");
-                        objectFile = open(optarg[1] ? &optarg[1] : argv[optind++],
-                                          O_WRONLY | O_CREAT | O_TRUNC,
-                                          S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+                        objectFile = create_file(optarg[1] ? &optarg[1] : argv[optind++]);
                     break;
                     case 'h':
                         if (headerFile != -1)
                             print_error("'-Fh' option used more than once");
-                        headerFile = open(optarg[1] ? &optarg[1] : argv[optind++],
-                                          O_WRONLY | O_CREAT | O_TRUNC,
-                                          S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+                        headerFile = create_file(optarg[1] ? &optarg[1] : argv[optind++]);
+                    break;
+                    case 'c':
+                        if (assemblyFile != -1)
+                            print_error("'-Fc' option used more than once");
+                        assemblyFile = create_file(optarg[1] ? &optarg[1] : argv[optind++]);
                     break;
                 }
                 outputFileSet = true;
@@ -515,8 +534,7 @@ int main(int argc, char **argv)
             case 'P':
                 if (processFile != -1)
                     print_error("'-P' option used more than once");
-                processFile = open(optarg, O_WRONLY | O_CREAT | O_TRUNC,
-                                    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+                processFile = create_file(optarg);
             break;
             case 'D':
             if (defineIndex < FXC_MAX_MACROS) {
@@ -535,7 +553,8 @@ int main(int argc, char **argv)
                 // Apply the long option flag bits and reset them
                 flags1 |= flagsBit1;
                 flags2 |= flagsBit2;
-                flagsBit1 = flagsBit2 = 0;
+                flagsAsm |= flagsBitAsm;
+                flagsBit1 = flagsBit2 = flagsBitAsm = 0;
             break;
             default:
                 print_error("'-%c' is not implemented yet", c);
@@ -555,6 +574,11 @@ int main(int argc, char **argv)
             "For clean future-proof DX10 shaders and effects, use strict mode (-Ges)"
         );
     }
+    if (processFile != -1 && !target)
+        print_error("cannot preprocess to file and compile at the same time");
+
+    if (!target)
+        target = "fx_2_0";
 
     if (!outputFileSet)
         assemblyFile = STDOUT_FILENO;
@@ -676,32 +700,42 @@ int main(int argc, char **argv)
                     dprintf(headerFile, "\n    ");
             }
             dprintf(headerFile, "\n};\n");
-            close(headerFile);
-            printf("compilation header save succeeded\n");
+            if (headerFile != STDOUT_FILENO) {
+                close(headerFile);
+                printf("compilation header save succeeded\n");
+            }
         }
 
         if (objectFile != -1) {
             SIZE_T wrote = write(objectFile, out, size);
             assert(wrote == size);
-            close(objectFile);
-            printf("compilation object save succeeded\n");
+            if (objectFile != STDOUT_FILENO) {
+                close(objectFile);
+                printf("compilation object save succeeded\n");
+            }
         }
 
         if (processFile != -1) {
             SIZE_T wrote = write(processFile, out, size);
             assert(wrote == size);
-            close(processFile);
+            if (processFile != STDOUT_FILENO)
+                close(processFile);
         }
 
         if (assemblyFile != -1) {
             ID3DBlob *disassm;
-            D3DDisassemble(out, size, 0, cmdLine, &disassm);
-            out = (PBYTE)ID3D10Blob_GetBufferPointer(disassm);
-            size = ID3D10Blob_GetBufferSize(disassm);
-            SIZE_T wrote = write(assemblyFile, out, size);
-            assert(wrote == size);
-            close(assemblyFile);
-            ID3D10Blob_Release(disassm);
+            hr = D3DDisassemble(out, size, flagsAsm, cmdLine, &disassm);
+            if (hr != 0 || !pCode) {
+                fprintf(stderr, "disassembly failed; no disassembly produced\n");
+            } else {
+                out = (PBYTE)ID3D10Blob_GetBufferPointer(disassm);
+                size = ID3D10Blob_GetBufferSize(disassm);
+                SIZE_T wrote = write(assemblyFile, out, size);
+                assert(wrote == size);
+                ID3D10Blob_Release(disassm);
+            }
+            if (assemblyFile != STDOUT_FILENO)
+                close(assemblyFile);
         }
 
         ID3D10Blob_Release(pCode);
