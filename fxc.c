@@ -321,7 +321,7 @@ int main(int argc, char **argv)
     
     HRESULT hr = 1;
     UINT flags1 = 0, flags2 = 0;
-    LPCSTR target = "vs_2_0", entryPoint = NULL;
+    LPCSTR target = "fx_2_0", entryPoint = NULL;
     ID3DBlob *pCode = NULL, *pError = NULL;
     D3D_SHADER_MACRO defines[FXC_MAX_MACROS + 1] = { { NULL, NULL } };
     ID3D10Include includer = { &include_vtbl, { AT_FDCWD, -1 } };
